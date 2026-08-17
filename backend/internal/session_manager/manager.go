@@ -3468,10 +3468,12 @@ func hookBinaryDir(exe string) (string, bool) {
 	return filepath.Dir(exe), true
 }
 
-// pinnedHookDir is the directory this daemon's PATH pin puts first, or "" when
-// no pin is possible (unresolvable executable, or one not named "ao").
-func (m *Manager) pinnedHookDir() string {
-	exe, err := m.executable()
+// PinnedHookDir is the directory HookPATH puts first for this executable, or
+// "" when no pin is possible (unresolvable executable, or one not named "ao").
+// Callers pass it to AugmentRuntimePATHForLaunchBinary so the pin survives the
+// launch-binary prepend.
+func PinnedHookDir(executable func() (string, error)) string {
+	exe, err := executable()
 	if err != nil {
 		return ""
 	}
@@ -3480,6 +3482,12 @@ func (m *Manager) pinnedHookDir() string {
 		return ""
 	}
 	return dir
+}
+
+// pinnedHookDir is the directory this daemon's PATH pin puts first, or "" when
+// no pin is possible.
+func (m *Manager) pinnedHookDir() string {
+	return PinnedHookDir(m.executable)
 }
 
 // provisionWorkspace applies the project's per-workspace setup after the
@@ -3884,14 +3892,18 @@ func launchBinary(argv []string) (string, bool) {
 }
 
 func (m *Manager) augmentRuntimePATHForLaunchBinary(ctx context.Context, env map[string]string, argv []string) {
-	AugmentRuntimePATHForLaunchBinary(ctx, env, argv, m.lookPath)
+	AugmentRuntimePATHForLaunchBinary(ctx, env, argv, m.lookPath, m.pinnedHookDir())
 }
 
 // AugmentRuntimePATHForLaunchBinary prepends the resolved launch binary
 // directory to the runtime PATH. For Node-backed CLI shims, it also prepends a
 // concrete Node runtime directory so shebangs like `#!/usr/bin/env node` work
 // in GUI-launched terminals whose PATH may not include shell manager setup.
-func AugmentRuntimePATHForLaunchBinary(ctx context.Context, env map[string]string, argv []string, lookPath func(string) (string, error)) {
+//
+// pinnedDir is the directory the caller already pinned to the head of
+// env["PATH"] (see PinnedHookDir); it is restored to the head afterwards so the
+// launch-binary prepend cannot shadow it. Pass "" when nothing was pinned.
+func AugmentRuntimePATHForLaunchBinary(ctx context.Context, env map[string]string, argv []string, lookPath func(string) (string, error), pinnedDir string) {
 	bin, ok := launchBinary(argv)
 	if !ok || !filepath.IsAbs(bin) {
 		return
@@ -3921,7 +3933,7 @@ func AugmentRuntimePATHForLaunchBinary(ctx context.Context, env map[string]strin
 	// agent CLIs) would win the lookup inside the session. Put the pin back at
 	// the head; the agent binary is invoked by absolute path anyway, so its
 	// directory does not need to be first.
-	parts = restorePinnedDir(parts, m.pinnedHookDir())
+	parts = restorePinnedDir(parts, pinnedDir)
 	env["PATH"] = strings.Join(parts, string(os.PathListSeparator))
 }
 
