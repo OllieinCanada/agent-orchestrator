@@ -140,6 +140,7 @@ describe("createEventTransport", () => {
 			expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["session-agent-switches"] });
 			expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["session-scm-summary"] });
 			expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["session-usage"] });
+			expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["editor-handoff"] });
 		} finally {
 			vi.useRealTimers();
 		}
@@ -195,6 +196,35 @@ describe("createEventTransport", () => {
 			expect(queryClient.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["workspaces"] });
 			expect(queryClient.invalidateQueries).not.toHaveBeenCalledWith({
 				queryKey: ["session-scm-summary"],
+			});
+			expect(queryClient.invalidateQueries).not.toHaveBeenCalledWith({
+				queryKey: ["editor-handoff", "chat-1"],
+			});
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("invalidates editor-handoff readiness for a durable session update", () => {
+		vi.useFakeTimers();
+		try {
+			const queryClient = fakeQueryClient();
+			createEventTransport(queryClient).connect();
+			EventSourceStub.instances[0].emit(
+				"session_updated",
+				JSON.stringify({
+					seq: 44,
+					projectId: "proj-1",
+					sessionId: "session-1",
+					type: "session_updated",
+					payload: { id: "session-1", activity: "idle", isTerminated: false },
+					createdAt: "2026-08-27T02:31:38Z",
+				}),
+			);
+
+			vi.advanceTimersByTime(200);
+			expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+				queryKey: ["editor-handoff", "session-1"],
 			});
 		} finally {
 			vi.useRealTimers();
