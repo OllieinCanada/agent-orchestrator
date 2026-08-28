@@ -14,6 +14,7 @@ import { KeyboardShortcutsDialog } from "../components/KeyboardShortcutsDialog";
 import { KeyboardShortcutsSettingsDialog } from "../components/settings/KeyboardShortcutsSettingsDialog";
 import { ShellTopbar } from "../components/ShellTopbar";
 import { SessionTopbarProvider } from "../components/SessionTopbarPortal";
+import { SessionLinkFeedback } from "../components/SessionLinkFeedback";
 import { OrchestratorReplacementDialog } from "../components/OrchestratorReplacementDialog";
 import { Sidebar } from "../components/Sidebar";
 import { SidebarProvider } from "../components/ui/sidebar";
@@ -835,6 +836,7 @@ function ShellLayout() {
 					</main>
 					</div>
 					<DaemonFailureBanner status={daemonStatus} />
+					<SessionLinkFeedback />
 					{/* When ShellTopbar is hidden, keep a macOS window-drag strip over
               the traffic-light band only. The fixed TitlebarNav renders after
               this strip so its no-drag buttons remain clickable. */}

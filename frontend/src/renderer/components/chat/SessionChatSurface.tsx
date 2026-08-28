@@ -33,6 +33,7 @@ import {
 	type AgentSwitchPresentation,
 } from "../../lib/agent-switch-presentation";
 import { cn } from "../../lib/utils";
+import { useSessionLinkNavigation } from "../../lib/use-session-link-navigation";
 import type { Theme } from "../../stores/ui-store";
 import { can } from "../../types/conversation";
 import type { ConversationSnapshot } from "../../types/conversation";
@@ -122,6 +123,7 @@ export function SessionChatSurface({
 	const { paths, truncated } = useWorkspaceFilePaths(session.id, Boolean(snapshot));
 	const stageAttachments = useStageAttachments(session.id);
 	const openLinkInBrowser = useSessionBrowserLink(session);
+	const openSessionLink = useSessionLinkNavigation();
 	// In-place agent switching is the same session-level operation in either
 	// interface; the chat header offers the same entry point the terminal pane's
 	// tab strip does. Mirrors CenterPane: dialog open flag plus the element the
@@ -258,6 +260,7 @@ export function SessionChatSurface({
 				snapshot={renderSnapshot}
 				agentInputDisabled={switchLocksChat || switchSelectorOpen}
 				onLinkOpen={openLinkInBrowser}
+				onSessionLinkOpen={openSessionLink}
 				sessionTitle={session.title}
 				sessionRole={session.kind}
 				session={session}
