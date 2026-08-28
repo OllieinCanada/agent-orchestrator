@@ -18,7 +18,7 @@ export function useSessionLinkNavigation(): (url: string) => boolean {
 			setSessionLinkError("AO could not verify that session. Check the daemon connection and try again.");
 			return false;
 		}
-		const resolved = resolveSessionLink(url, workspaceQuery.data);
+		const resolved = resolveSessionLink(url, workspaceQuery.data ?? []);
 		if (!resolved) {
 			setSessionLinkError("That session is missing or is not accessible in this AO workspace.");
 			return false;

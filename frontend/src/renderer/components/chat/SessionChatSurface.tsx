@@ -62,6 +62,8 @@ export function SessionChatSurface({
 	onOpenFiles,
 	onOpenFile,
 	headerActions,
+	workspaceTabs,
+	workspaceFileActive,
 	controllerTransitioning,
 }: {
 	session: WorkspaceSession;
@@ -86,6 +88,8 @@ export function SessionChatSurface({
 	/** Opens the Files inspector focused on one changed path. */
 	onOpenFile?: (path: string) => void;
 	headerActions?: ReactNode;
+	workspaceTabs?: ReactNode;
+	workspaceFileActive?: boolean;
 	/** The target controller is being installed by an interface handoff. */
 	controllerTransitioning?: boolean;
 }) {
@@ -275,6 +279,7 @@ export function SessionChatSurface({
 				onRenameShellTerminal={onRenameShellTerminal}
 				switchAgentControl={
 					<TerminalSwitchAgentButton
+						agentSwitch={selectedDurableAgentSwitch}
 						container={switchSelectorContainer}
 						onOpenChange={setSwitchSelectorOpen}
 						open={switchSelectorOpen}
@@ -287,6 +292,8 @@ export function SessionChatSurface({
 				daemonReady={daemonReady}
 				theme={theme}
 				headerActions={headerActions}
+				workspaceTabs={workspaceTabs}
+				workspaceFileActive={workspaceFileActive}
 				controllerTransitioning={controllerTransitioning}
 				hasOlder={hasOlder}
 				loadingOlder={isLoadingOlder}
@@ -319,6 +326,7 @@ export function SessionChatSurface({
 				rollbackError={commands.rollbackError}
 				onOpenFiles={onOpenFiles}
 				onOpenFile={onOpenFile}
+				retryControl={commands.retryControl}
 				onEditMessage={commands.editMessage}
 				editMessagePending={commands.editMessagePending}
 				editMessageError={commands.editMessageError}
