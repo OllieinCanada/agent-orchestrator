@@ -1647,6 +1647,11 @@ function ReviewsSection({
 					setReviewerMode(config.mode ?? "");
 					saveReviewer.mutate({ harness: next, model: config.model ?? "", mode: config.mode ?? "" });
 				}}
+				onReviewerHarnessPreviewChange={(next) => {
+					setReviewerOverride(next);
+					setReviewerModel("");
+					setReviewerMode("");
+				}}
 				session={session}
 			/>
 			<MergedReviewsSection
@@ -2095,6 +2100,7 @@ function ReviewPanel({
 	reviewerModel,
 	reviewerMode,
 	onReviewerOverrideChange,
+	onReviewerHarnessPreviewChange,
 	onTrigger,
 	onCancel,
 	onAutoReviewChange,
@@ -2117,6 +2123,7 @@ function ReviewPanel({
 	reviewerModel: string;
 	reviewerMode: string;
 	onReviewerOverrideChange: (next: ReviewerHarness | "", config: { model?: string; mode?: string }) => void;
+	onReviewerHarnessPreviewChange: (next: ReviewerHarness | "") => void;
 	onTrigger: () => void;
 	onCancel: () => void;
 	onAutoReviewChange: (enabled: boolean) => void;
@@ -2234,7 +2241,7 @@ function ReviewPanel({
 							defaultOptionLabel={agentLabel(resolvedDefaultHarness)}
 							disabled={reviewRunning || autoReviewEnabled || isKilling || isSwitchingReviewer || isTriggering || isCancelling}
 							installed={agentCatalog?.installed}
-							onChange={(next) => onReviewerOverrideChange(next as ReviewerHarness | "", {})}
+							onChange={(next) => onReviewerHarnessPreviewChange(next as ReviewerHarness | "")}
 							onConfigChange={(harness, config) => onReviewerOverrideChange(harness as ReviewerHarness | "", config)}
 							model={reviewerModel}
 							mode={reviewerMode}
