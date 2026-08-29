@@ -34,6 +34,7 @@ import type {
 	TerminalUserInputSource,
 } from "../hooks/useTerminalSession";
 import { aoBridge } from "../lib/bridge";
+import { isDialogOrMenuOpen } from "../lib/dom-selectors";
 import { TERMINAL_FONT_SIZE_DEFAULT } from "../lib/design-tokens";
 import { isWebLink, openLinkInSystemBrowser } from "../lib/external-link-policy";
 import { isMacPlatform } from "../lib/platform";
@@ -211,6 +212,17 @@ function normalizedTerminalShortcut(event: KeyboardEvent): string | null {
 function terminalHasFocus(host: HTMLElement): boolean {
 	const activeElement = document.activeElement;
 	return !!activeElement && host.contains(activeElement);
+}
+
+function canAutoFocusTerminal(host: HTMLElement): boolean {
+	if (isDialogOrMenuOpen()) return false;
+	const activeElement = document.activeElement;
+	if (!(activeElement instanceof HTMLElement) || activeElement === document.body) return true;
+	if (host.contains(activeElement)) return true;
+	// Selecting a session in the sidebar deliberately leaves its navigation
+	// button focused. That is the one control that should hand focus to the
+	// destination TUI; every other focused control remains authoritative.
+	return activeElement.matches("button[aria-current='page']");
 }
 
 type XtermInternal = Terminal & {
@@ -1124,6 +1136,8 @@ export function XtermTerminal(props: XtermTerminalProps) {
 
 	useEffect(() => {
 		if (!props.focusRequested || props.isVisible === false) return undefined;
+		const host = hostRef.current;
+		if (!host || !canAutoFocusTerminal(host)) return undefined;
 		try {
 			termRef.current?.focus();
 		} catch {

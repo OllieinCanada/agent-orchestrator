@@ -270,6 +270,56 @@ describe("XtermTerminal", () => {
 		await waitFor(() => expect(state.lastTerminal!.focus).toHaveBeenCalled());
 	});
 
+	it("does not steal focus from an open dialog or another control", () => {
+		const { rerender } = render(<XtermTerminal theme="dark" />);
+		const dialog = document.createElement("div");
+		dialog.setAttribute("role", "dialog");
+		dialog.dataset.state = "open";
+		const dialogInput = document.createElement("input");
+		dialog.appendChild(dialogInput);
+		document.body.appendChild(dialog);
+		dialogInput.focus();
+		state.lastTerminal!.focus.mockClear();
+
+		rerender(<XtermTerminal focusRequested theme="dark" />);
+
+		expect(state.lastTerminal!.focus).not.toHaveBeenCalled();
+
+		dialog.remove();
+		const control = document.createElement("button");
+		document.body.appendChild(control);
+		control.focus();
+		rerender(<XtermTerminal theme="dark" />);
+		state.lastTerminal!.focus.mockClear();
+		rerender(<XtermTerminal focusRequested theme="dark" />);
+
+		expect(state.lastTerminal!.focus).not.toHaveBeenCalled();
+		control.remove();
+	});
+
+	it("allows the session navigation button to hand focus to the destination TUI", async () => {
+		const { rerender } = render(<XtermTerminal theme="dark" />);
+		const sessionButton = document.createElement("button");
+		sessionButton.setAttribute("aria-current", "page");
+		document.body.appendChild(sessionButton);
+		sessionButton.focus();
+		state.lastTerminal!.focus.mockClear();
+
+		rerender(<XtermTerminal focusRequested theme="dark" />);
+
+		await waitFor(() => expect(state.lastTerminal!.focus).toHaveBeenCalled());
+		sessionButton.remove();
+	});
+
+	it("focuses a retained terminal when it becomes visible", async () => {
+		const { rerender } = render(<XtermTerminal focusRequested isVisible={false} theme="dark" />);
+		state.lastTerminal!.focus.mockClear();
+
+		rerender(<XtermTerminal focusRequested isVisible theme="dark" />);
+
+		await waitFor(() => expect(state.lastTerminal!.focus).toHaveBeenCalled());
+	});
+
 	it("updates the live terminal palette when the named color theme changes", () => {
 		const style = document.createElement("style");
 		style.textContent = `

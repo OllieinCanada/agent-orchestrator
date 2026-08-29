@@ -653,7 +653,8 @@ export function CenterPane({
 						focusRequested={
 							target.kind === "shell" ||
 							(target.kind === "worker" &&
-								(Boolean(presentation?.allowSourceInput) || Boolean(displayedSuccessNotice)))
+								((Boolean(session && session.mode !== "chat") && !workerInputDisabled) ||
+									Boolean(presentation?.allowSourceInput) || Boolean(displayedSuccessNotice)))
 						}
 						isFullscreen={isFullscreen}
 						inputDisabled={workerInputDisabled}
