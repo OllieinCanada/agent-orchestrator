@@ -410,35 +410,24 @@ func (s *Service) triggerWithSource(
 	harness domain.ReviewerHarness,
 	source domain.ReviewTriggerSource,
 ) (reviewcore.TriggerResult, error) {
+	triggeredPayload := map[string]any{"trigger": string(source)}
 	result, err := s.engineTrigger(ctx, workerID, harness, source)
 	if err != nil {
+		s.emit("ao.review.triggered", workerID, triggeredPayload)
 		s.emit("ao.review.trigger_failed", workerID, map[string]any{
 			"error_kind": reviewErrorKind(err),
 			"trigger":    string(source),
 		})
 		return result, err
 	}
-	// An automatic pass that did no work must not be reported as a trigger. Two
-	// shapes reach here: the coordinator's read of the session lost a race with
-	// the user (SkipReason), or the sweep found a review already running or the
-	// current head already covered (nothing created). Counting either inflates
-	// how often auto-review actually reviews anything, by one event per sweep for
-	// the whole life of a long review, and spends the per-name daily rate limit
-	// that real triggers need. A manual reuse is a different fact: the user
-	// pressed the button, and that is worth counting.
-	if source == domain.ReviewTriggerAuto && (result.SkipReason != "" || len(result.CreatedRuns) == 0) {
-		return result, nil
+	if result.Run.Harness != "" {
+		triggeredPayload["harness"] = string(result.Run.Harness)
 	}
-	// created_runs distinguishes a genuinely new pass from a reuse of a running
-	// or up-to-date one, which the engine also reports as success. harness is the
-	// one actually used, resolved by the engine, not the caller's override, which
-	// may be empty.
-	s.emit("ao.review.triggered", workerID, map[string]any{
-		"harness":      string(result.Run.Harness),
-		"created_runs": len(result.CreatedRuns),
-		"reused":       len(result.CreatedRuns) == 0,
-		"trigger":      string(source),
-	})
+	// ao.review.triggered counts every attempt. created_runs and reused then say
+	// whether the attempt created work or converged on an existing/no-op state.
+	triggeredPayload["created_runs"] = len(result.CreatedRuns)
+	triggeredPayload["reused"] = result.SkipReason != "" || len(result.CreatedRuns) == 0
+	s.emit("ao.review.triggered", workerID, triggeredPayload)
 	return result, nil
 }
 
