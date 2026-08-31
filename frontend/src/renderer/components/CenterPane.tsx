@@ -37,7 +37,7 @@ import { isLinuxPlatform, isMacPlatform } from "../lib/platform";
 import { aoBridge } from "../lib/bridge";
 import { handleTerminalTabListKeyDown } from "../lib/terminal-tabs";
 import { cn } from "../lib/utils";
-import { sidebarOccupiesLayout, useUiStore, type Theme } from "../stores/ui-store";
+import { sidebarIsCompact, sidebarOccupiesLayout, useUiStore, type Theme } from "../stores/ui-store";
 import type { TerminalTarget } from "../types/terminal";
 import {
 	isOrchestratorSession,
@@ -153,6 +153,7 @@ export function CenterPane({
 	const [terminalBounds, setTerminalBounds] = useState({ leftInset: 0, rightInset: 0, width: 0 });
 	const [terminalOrder, setTerminalOrder] = useState<TerminalOrder | null>(null);
 	const isSidebarOpen = useUiStore(sidebarOccupiesLayout);
+	const isSidebarCompact = useUiStore(sidebarIsCompact);
 	const sessionId = session?.id;
 	const auxiliaryTerminals = useMemo<AuxiliaryTerminal[]>(
 		() => [
@@ -542,7 +543,8 @@ export function CenterPane({
 			<div className="session-topbar-surface flex min-w-0 flex-1" data-testid="session-workspace-topbar">
 				<div
 					className={cn(
-						"flex min-w-0 shrink items-stretch",
+						"session-topbar-terminal-region flex min-w-0 shrink items-stretch",
+						!isFullscreen && isSidebarCompact && isMac && "session-topbar-traffic-light-clearance-mac",
 						!isFullscreen && !isSidebarOpen && isMac && "session-topbar-titlebar-clearance-mac",
 						!isFullscreen && !isSidebarOpen && isLinux && "session-topbar-titlebar-clearance-linux",
 					)}
