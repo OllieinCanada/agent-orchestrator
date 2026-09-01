@@ -325,9 +325,17 @@ function CodexAccountRow({ account, expanded, switchSourceAvailable, resetCredit
 					</div>
 					<ChevronDown className={`ml-auto mt-1 size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? "" : "-rotate-90"}`} aria-hidden="true" />
 				</button>
-				{switchSourceAvailable && !account.active && account.status === "valid" && authorized ? <Button type="button" size="sm" variant="outline" disabled={mutationDisabled || busy || Boolean(switchUnavailableReason)} title={switchUnavailableReason} onClick={onSwitch}>{t("settings.codexAccounts.switchAction")}</Button> : null}
 			</div>
-			{expanded ? <CodexAccountDetails account={account} resetCreditSupported={resetCreditSupported} mutationDisabled={mutationDisabled} resetBusy={resetBusy} onUseReset={onUseReset} /> : null}
+			{expanded ? (
+				<>
+					<CodexAccountDetails account={account} resetCreditSupported={resetCreditSupported} mutationDisabled={mutationDisabled} resetBusy={resetBusy} onUseReset={onUseReset} />
+					{switchSourceAvailable && !account.active && account.status === "valid" && authorized ? (
+						<div className="ml-9 mt-4 flex justify-end border-t border-border/70 pt-3">
+							<Button type="button" size="sm" variant="outline" disabled={mutationDisabled || busy || Boolean(switchUnavailableReason)} title={switchUnavailableReason} onClick={onSwitch}>{t("settings.codexAccounts.switchAction")}</Button>
+						</div>
+					) : null}
+				</>
+			) : null}
 		</div>
 	);
 }

@@ -333,6 +333,9 @@ it("starts a global switch with the displayed account revision", async () => {
 	});
 	renderSection();
 	await screen.findByText("other@example.com");
+	expect(screen.queryByRole("button", { name: "Switch to this account" })).not.toBeInTheDocument();
+	const inactiveRow = document.querySelector(`[data-account-id="${inactiveAccount.id}"]`);
+	fireEvent.click(inactiveRow?.querySelector("button") as HTMLButtonElement);
 	fireEvent.click(screen.getByRole("button", { name: "Switch to this account" }));
 	fireEvent.click(await screen.findByRole("button", { name: "Switch account" }));
 	await waitFor(() => expect(postMock).toHaveBeenCalledWith("/api/v1/agents/codex/account-switches", {
