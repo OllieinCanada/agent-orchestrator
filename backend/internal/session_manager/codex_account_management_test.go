@@ -104,6 +104,47 @@ func TestCodexAccountSwitchRejectsRunningSessionWithoutExactNativeIdentity(t *te
 	}
 }
 
+func TestCodexAccountSwitchAllowsFreshRestartForUntouchedTUI(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["untouched-codex"] = domain.SessionRecord{
+		ID: "untouched-codex", Harness: domain.HarnessCodex, Kind: domain.KindOrchestrator, Mode: domain.SessionModeTUI,
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "runtime-1", RuntimeLaunchID: "generation-1"},
+	}
+	log := []string{}
+	runtime := &transitionRuntime{
+		fakeRuntime: &fakeRuntime{aliveByHandle: map[string]bool{"runtime-1": true}},
+		log:         &log,
+		outputForCall: func(int) string {
+			return idleTerminalOutput
+		},
+	}
+	manager := New(Deps{
+		Store: store, Runtime: runtime,
+		Agents: singleAgent{agent: untouchedEmptyTransitionAgent{}},
+	})
+	switchStore := &collectingCodexSwitchStore{}
+	switchRecord := domain.CodexAccountSwitch{ID: "switch-1"}
+	if err := manager.populateCodexAccountSwitchSessions(context.Background(), switchStore, &switchRecord); err != nil {
+		t.Fatal(err)
+	}
+	if len(switchStore.sessions) != 1 || !switchStore.sessions[0].WasRunning || switchStore.sessions[0].NativeSessionID != "" {
+		t.Fatalf("recorded fresh restart = %#v", switchStore.sessions)
+	}
+	forceFresh, requireNative := codexAccountSwitchRestartPolicy(switchStore.sessions[0])
+	if !forceFresh || requireNative {
+		t.Fatalf("restart policy = fresh %t native %t, want true/false", forceFresh, requireNative)
+	}
+}
+
+func TestCodexAccountSwitchNativeRestartPolicyRemainsExact(t *testing.T) {
+	forceFresh, requireNative := codexAccountSwitchRestartPolicy(domain.CodexAccountSwitchSession{
+		WasRunning: true, InterfaceMode: domain.SessionModeTUI, NativeSessionID: "native-thread-1",
+	})
+	if forceFresh || !requireNative {
+		t.Fatalf("restart policy = fresh %t native %t, want false/true", forceFresh, requireNative)
+	}
+}
+
 func TestCodexAccountSwitchSkipsPreservedShellAfterCodexExits(t *testing.T) {
 	store := newFakeStore()
 	store.sessions["exited-codex"] = domain.SessionRecord{

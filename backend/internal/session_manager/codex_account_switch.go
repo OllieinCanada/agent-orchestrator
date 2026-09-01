@@ -236,7 +236,9 @@ func (m *Manager) populateCodexAccountSwitchSessions(ctx context.Context, store 
 			}
 		}
 		if rec.Harness == domain.HarnessCodex && wasRunning && nativeID == "" {
-			return fmt.Errorf("%w: %s", ErrCodexRunningSessionNotResumable, rec.ID)
+			if mode != domain.SessionModeTUI || !m.codexTUIFreshRestartSafe(ctx, rec) {
+				return fmt.Errorf("%w: %s", ErrCodexRunningSessionNotResumable, rec.ID)
+			}
 		}
 		if rec.Harness == domain.HarnessCodex && wasRunning && generation == "" {
 			return fmt.Errorf("%w: %s controller generation", ErrCodexRunningSessionNotResumable, rec.ID)
@@ -295,6 +297,25 @@ func (m *Manager) codexTUIWorkloadRunning(ctx context.Context, rec domain.Sessio
 		return false, fmt.Errorf("inspect Codex workload for %s: %w", rec.ID, err)
 	}
 	return workloadAlive, nil
+}
+
+// codexTUIFreshRestartSafe positively proves that a live Codex process has not
+// started a native conversation yet. The terminal-surface proof is shared with
+// interface switching: missing hooks, metadata, or rollout files alone are not
+// enough. An admitted switch session with an empty NativeSessionID therefore
+// durably means "restart this untouched controller fresh"; older code never
+// persisted that shape for a running Codex session.
+func (m *Manager) codexTUIFreshRestartSafe(ctx context.Context, rec domain.SessionRecord) bool {
+	if m.agents == nil {
+		return false
+	}
+	agent, ok := m.agents.Agent(rec.Harness)
+	return ok && m.nativeConversationNotStarted(ctx, rec, agent)
+}
+
+func codexAccountSwitchRestartPolicy(item domain.CodexAccountSwitchSession) (forceFresh, requireNativeHistory bool) {
+	forceFresh = item.WasRunning && item.InterfaceMode == domain.SessionModeTUI && strings.TrimSpace(item.NativeSessionID) == ""
+	return forceFresh, !forceFresh
 }
 
 func (m *Manager) runCodexAccountSwitch(ctx context.Context, credentials ports.CodexAccountCredentialManager, store ports.CodexAccountSwitchStore, sw domain.CodexAccountSwitch) {
@@ -577,11 +598,14 @@ func (m *Manager) restartCodexSwitchSessions(ctx context.Context, store ports.Co
 				value := ports.RuntimeHandle{ID: rec.Metadata.RuntimeHandleID}
 				handle = &value
 			}
-			result, restartErr := m.relaunchSessionWithPolicy(ctx, "Codex account switch", rec, project, ws, handle, false, true)
-			if restartErr == nil && item.InterfaceMode == domain.SessionModeTUI && result.Mode != RestoreModeNative {
+			forceFresh, requireNativeHistory := codexAccountSwitchRestartPolicy(*item)
+			result, restartErr := m.relaunchSessionWithPolicy(
+				ctx, "Codex account switch", rec, project, ws, handle, forceFresh, requireNativeHistory,
+			)
+			if restartErr == nil && requireNativeHistory && item.InterfaceMode == domain.SessionModeTUI && result.Mode != RestoreModeNative {
 				restartErr = errors.New("codex native history resume was not selected")
 			}
-			if restartErr == nil {
+			if restartErr == nil && requireNativeHistory {
 				resumedNativeID := strings.TrimSpace(result.Session.Metadata.AgentSessionID)
 				if item.InterfaceMode == domain.SessionModeChat {
 					resumedNativeID = strings.TrimSpace(result.Session.Metadata.ProviderConversationID)
