@@ -408,11 +408,6 @@ type Manager struct {
 	// switchDecisionInput opens a narrow human-only terminal lane while the
 	// source is blocked on permission during a mandatory switch.
 	switchDecisionInput map[domain.SessionID]domain.AgentSwitchID
-	// codexAccountSwitchDecisionInput serves the equivalent narrow lane during
-	// a global Codex account switch. It is opened only while an already-running
-	// Codex TUI is visibly waiting on a provider-owned decision, then closed and
-	// drained before the exact controller generation is stopped.
-	codexAccountSwitchDecisionInput map[domain.SessionID]string
 	// retainedSwitches marks switch gates intentionally kept closed after an
 	// ambiguous external side effect (for example a target runtime that could
 	// not be removed). A later reconciliation pass may reclaim exactly these
@@ -709,39 +704,38 @@ type Deps struct {
 // time.Now when Deps.Clock is nil.
 func New(d Deps) *Manager {
 	m := &Manager{
-		runtime:                         d.Runtime,
-		agents:                          d.Agents,
-		workspace:                       d.Workspace,
-		store:                           d.Store,
-		defaults:                        d.Defaults,
-		chat:                            d.Chat,
-		lcm:                             d.Lifecycle,
-		preview:                         d.Preview,
-		browser:                         d.Browser,
-		browserCapabilities:             d.BrowserCapabilities,
-		attachments:                     attachmentstore.New(d.DataDir),
-		attachmentSuffix:                randomSuffix,
-		dataDir:                         d.DataDir,
-		runFilePath:                     strings.TrimSpace(d.RunFilePath),
-		clock:                           d.Clock,
-		reconcileWorkers:                d.ReconcileWorkers,
-		defaultBranchRefreshTimeout:     defaultBranchRefreshTimeout,
-		openTranscriptFile:              os.Open,
-		lookPath:                        d.LookPath,
-		executable:                      d.Executable,
-		newLaunchID:                     d.NewLaunchID,
-		backgroundContext:               d.BackgroundContext,
-		startupBackgroundReconcileDone:  make(chan struct{}),
-		agentOperations:                 make(map[domain.SessionID]agentOperationKind),
-		switchDecisionInput:             make(map[domain.SessionID]domain.AgentSwitchID),
-		codexAccountSwitchDecisionInput: make(map[domain.SessionID]string),
-		retainedSwitches:                make(map[domain.SessionID]struct{}),
-		inputLeases:                     make(map[domain.SessionID]int),
-		inputDrained:                    make(map[domain.SessionID]chan struct{}),
-		handoffWait:                     90 * time.Second,
-		switchPermissionDecisionWait:    time.Minute,
-		switchTargetStartWait:           3 * time.Second,
-		switchPostStopWait:              switchPostStopWait,
+		runtime:                        d.Runtime,
+		agents:                         d.Agents,
+		workspace:                      d.Workspace,
+		store:                          d.Store,
+		defaults:                       d.Defaults,
+		chat:                           d.Chat,
+		lcm:                            d.Lifecycle,
+		preview:                        d.Preview,
+		browser:                        d.Browser,
+		browserCapabilities:            d.BrowserCapabilities,
+		attachments:                    attachmentstore.New(d.DataDir),
+		attachmentSuffix:               randomSuffix,
+		dataDir:                        d.DataDir,
+		runFilePath:                    strings.TrimSpace(d.RunFilePath),
+		clock:                          d.Clock,
+		reconcileWorkers:               d.ReconcileWorkers,
+		defaultBranchRefreshTimeout:    defaultBranchRefreshTimeout,
+		openTranscriptFile:             os.Open,
+		lookPath:                       d.LookPath,
+		executable:                     d.Executable,
+		newLaunchID:                    d.NewLaunchID,
+		backgroundContext:              d.BackgroundContext,
+		startupBackgroundReconcileDone: make(chan struct{}),
+		agentOperations:                make(map[domain.SessionID]agentOperationKind),
+		switchDecisionInput:            make(map[domain.SessionID]domain.AgentSwitchID),
+		retainedSwitches:               make(map[domain.SessionID]struct{}),
+		inputLeases:                    make(map[domain.SessionID]int),
+		inputDrained:                   make(map[domain.SessionID]chan struct{}),
+		handoffWait:                    90 * time.Second,
+		switchPermissionDecisionWait:   time.Minute,
+		switchTargetStartWait:          3 * time.Second,
+		switchPostStopWait:             switchPostStopWait,
 		// Provider startup, including slow MCP initialization, can delay the
 		// prompt-submit hook even though the continuation is correctly buffered.
 		// Leave enough headroom to avoid a false delivery failure.

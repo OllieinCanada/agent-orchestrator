@@ -121,6 +121,25 @@ it("does not offer switching when the device account has no reconciled source", 
 	expect(screen.queryByRole("button", { name: "Switch to this account" })).not.toBeInTheDocument();
 });
 
+it("shows recovery as an action instead of indefinite switch progress", async () => {
+	const recoveryResponse = {
+		...accountResponse,
+		currentSwitch: {
+			id: "33333333-3333-4333-8333-333333333333",
+			phase: "recovery_required",
+			reason: "Some Codex sessions need recovery.",
+			canRecover: true,
+			sessions: [],
+		},
+	};
+	getMock.mockResolvedValue({ data: recoveryResponse });
+	postMock.mockResolvedValue({ data: recoveryResponse });
+
+	renderSection();
+	expect(await screen.findByRole("button", { name: "Retry failed sessions" })).toBeInTheDocument();
+	expect(screen.queryByLabelText("Some Codex sessions need recovery.")).not.toBeInTheDocument();
+});
+
 it("presents plan, general and model usage limits with remaining-capacity meters", async () => {
 	const detailedAccount = {
 		...activeAccount,

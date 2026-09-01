@@ -549,6 +549,56 @@ func TestCredentialActivationDoesNotOverwriteExternalRace(t *testing.T) {
 	}
 }
 
+func TestCredentialActivationVerifiesWithoutASecondProactiveRefresh(t *testing.T) {
+	root := t.TempDir()
+	globalHome := filepath.Join(root, "global-codex")
+	if err := ensurePrivateDirectory(globalHome); err != nil {
+		t.Fatal(err)
+	}
+	globalPath := filepath.Join(globalHome, codexCredentialFilename)
+	if err := writeGlobalCredentialAtomic(globalPath, []byte("source-credential")); err != nil {
+		t.Fatal(err)
+	}
+	sourceEmail, targetEmail := "source@example.com", "target@example.com"
+	state := &fakeCodexAccountStateStore{active: domain.CodexActiveAccount{AccountID: testAccountID, Revision: 1}, found: true}
+	manager := newCodexAccountManager(context.Background(), filepath.Join(root, "accounts"), filepath.Join(root, "pending"), filepath.Join(root, "staging"), globalHome, nil, state, nil)
+	accountIDs := []string{testAccountID, "bb1e9a5d-37ad-43f8-83bd-13de8168f8af"}
+	manager.catalog.newID = func() string {
+		id := accountIDs[0]
+		accountIDs = accountIDs[1:]
+		return id
+	}
+	source := commitTestAccount(t, manager.catalog, manager.pendingRoot, "b60a377d-da68-4a61-86f2-f31f04c571f2", ports.CodexAccountObservation{Authentication: domain.AgentAuthenticationAuthorized, Method: domain.CodexAuthMethodChatGPT, Email: &sourceEmail})
+	target := commitTestAccount(t, manager.catalog, manager.pendingRoot, "1c5de3ab-82d0-4a68-a06b-8495cdeab909", ports.CodexAccountObservation{Authentication: domain.AgentAuthenticationAuthorized, Method: domain.CodexAuthMethodChatGPT, Email: &targetEmail})
+	if err := writePrivateFileAtomic(filepath.Join(source.Home, codexCredentialFilename), []byte("source-credential")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePrivateFileAtomic(filepath.Join(target.Home, codexCredentialFilename), []byte("target-credential")); err != nil {
+		t.Fatal(err)
+	}
+	manager.active = state.active
+	var refreshRequests []bool
+	manager.factory = &fakeCodexAccountFactory{open: func(account ports.CodexAccountContext) (ports.CodexAccountClient, error) {
+		if account.Home != globalHome || account.Managed {
+			t.Fatalf("activation context = %#v", account)
+		}
+		return &fakeCodexAccountClient{readFn: func(_ context.Context, refresh bool) (ports.CodexAccountObservation, error) {
+			refreshRequests = append(refreshRequests, refresh)
+			return ports.CodexAccountObservation{Authentication: domain.AgentAuthenticationAuthorized, Method: domain.CodexAuthMethodChatGPT, Email: &targetEmail}, nil
+		}}, nil
+	}}
+	active, err := manager.activateFromCredential(context.Background(), target.Snapshot.ID, 1, filepath.Join(target.Home, codexCredentialFilename), []byte("source-credential"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.AccountID != target.Snapshot.ID || active.Revision != 2 {
+		t.Fatalf("active account = %#v", active)
+	}
+	if !slices.Equal(refreshRequests, []bool{false}) {
+		t.Fatalf("activation refresh requests = %#v, want one non-refreshing verification", refreshRequests)
+	}
+}
+
 func TestConsumeResetCreditVerifiesAvailabilityAndRefreshesCapacity(t *testing.T) {
 	now := time.Now().UTC()
 	available := &domain.CodexResetCreditsSummary{AvailableCount: 1}

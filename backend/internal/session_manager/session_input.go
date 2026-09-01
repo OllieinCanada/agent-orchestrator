@@ -85,8 +85,7 @@ func (m *Manager) agentSwitchDecisionInputAllowedLocked(id domain.SessionID) boo
 		_, allowed := m.switchDecisionInput[id]
 		return allowed
 	case agentOperationCodexAccountSwitch:
-		_, allowed := m.codexAccountSwitchDecisionInput[id]
-		return allowed
+		return false
 	default:
 		return false
 	}
@@ -172,9 +171,6 @@ func (m *Manager) endAgentOperation(id domain.SessionID, kind agentOperationKind
 	if kind == agentOperationSwitch {
 		delete(m.retainedSwitches, id)
 		delete(m.switchDecisionInput, id)
-	}
-	if kind == agentOperationCodexAccountSwitch {
-		delete(m.codexAccountSwitchDecisionInput, id)
 	}
 	if current, ok := m.agentOperations[id]; ok && current == kind {
 		delete(m.agentOperations, id)

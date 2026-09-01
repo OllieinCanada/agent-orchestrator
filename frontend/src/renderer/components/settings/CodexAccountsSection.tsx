@@ -61,6 +61,7 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 	const switchTargets = data?.accounts.filter((account) => !account.active) ?? [];
 	const switchUnavailableReason = data?.capabilities.globalSwitch.state === "supported" ? undefined : data?.capabilities.globalSwitch.reason;
 	const switchActive = Boolean(currentSwitch && !["completed", "cancelled", "failed"].includes(currentSwitch.phase));
+	const switchRecovering = currentSwitch?.phase === "recovery_required";
 
 	const beginLogin = useCallback(async () => {
 		if (useUiStore.getState().codexAccountLoginTerminal || switchActive) return;
@@ -244,7 +245,7 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 				collapseLocked={Boolean(loginWorkflow)}
 				action={(
 					<div className="flex items-center gap-2">
-						{switchActive ? <LoaderCircle className="size-5 animate-spin text-muted-foreground" aria-label={currentSwitch?.reason} /> : null}
+						{switchActive && !switchRecovering ? <LoaderCircle className="size-5 animate-spin text-muted-foreground" aria-label={currentSwitch?.reason} /> : null}
 						{switchSourceAvailable && switchTargets.length > 0 ? (
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>

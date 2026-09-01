@@ -3,6 +3,7 @@ package sessionmanager
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -142,6 +143,53 @@ func TestCodexAccountSwitchNativeRestartPolicyRemainsExact(t *testing.T) {
 	})
 	if forceFresh || !requireNative {
 		t.Fatalf("restart policy = fresh %t native %t, want false/true", forceFresh, requireNative)
+	}
+}
+
+func TestCodexAccountSwitchInterruptsChatInsteadOfWaitingForDrain(t *testing.T) {
+	launcher := &recordingLauncher{}
+	manager := New(Deps{Chat: launcher})
+	sessions := []domain.CodexAccountSwitchSession{{
+		SessionID: "chat-session", InterfaceMode: domain.SessionModeChat, WasRunning: true,
+	}}
+	abort, err := manager.armCodexSwitchChatInterrupt(context.Background(), sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer abort()
+	if err := manager.prepareCodexSwitchChatInterrupt(context.Background(), sessions); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(launcher.armPolicy, []domain.SessionInterfaceTransitionPolicy{domain.SessionInterfaceTransitionInterrupt}) {
+		t.Fatalf("arm policies = %v, want interrupt", launcher.armPolicy)
+	}
+	if !slices.Equal(launcher.preparePolicy, []domain.SessionInterfaceTransitionPolicy{domain.SessionInterfaceTransitionInterrupt}) {
+		t.Fatalf("prepare policies = %v, want interrupt", launcher.preparePolicy)
+	}
+}
+
+func TestCodexAccountSwitchFreezesActiveTUIInputWithoutWaitingForIdle(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["active-codex"] = domain.SessionRecord{
+		ID: "active-codex", Harness: domain.HarnessCodex, Mode: domain.SessionModeTUI,
+		Activity: domain.Activity{State: domain.ActivityActive},
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "runtime-1"},
+	}
+	manager := New(Deps{Store: store, Runtime: &fakeRuntime{}})
+	gate := &transitionInputGate{acquired: make(chan string, 1), released: make(chan string, 1)}
+	manager.SetTerminalInputGate(gate)
+	release, err := manager.freezeCodexSwitchTerminalInput(context.Background(), []domain.CodexAccountSwitchSession{{
+		SessionID: "active-codex", InterfaceMode: domain.SessionModeTUI, WasRunning: true,
+	}})
+	if err != nil {
+		t.Fatalf("freeze active TUI input: %v", err)
+	}
+	if got := <-gate.acquired; got != "runtime-1" {
+		t.Fatalf("drained terminal = %q, want runtime-1", got)
+	}
+	release()
+	if got := <-gate.released; got != "runtime-1" {
+		t.Fatalf("released terminal = %q, want runtime-1", got)
 	}
 }
 

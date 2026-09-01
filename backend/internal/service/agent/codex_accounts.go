@@ -886,7 +886,10 @@ func (m *codexAccountManager) activateFromCredential(ctx context.Context, accoun
 		}
 		return domain.CodexActiveAccount{}, err
 	}
-	observation, err := client.Read(verifyCtx, true)
+	// The target slot was proactively refreshed during switch admission. This
+	// read verifies that the same structured account is now active globally
+	// without rotating its refresh token a second time inside the transaction.
+	observation, err := client.Read(verifyCtx, false)
 	_ = client.Close()
 	if err != nil || (observation.Authentication != domain.AgentAuthenticationAuthorized && observation.Authentication != domain.AgentAuthenticationNotApplicable) || !codexObservationMatchesAccount(record.Snapshot, observation) {
 		currentCredential, currentErr := readOpaqueCredential(globalPath)
@@ -1743,7 +1746,7 @@ func (s *Service) VerifyCurrentCodexAccount(ctx context.Context, accountID strin
 	if err != nil {
 		return apierr.Conflict("CODEX_GLOBAL_ACCOUNT_CHANGED", "The device Codex account could not be confirmed", nil)
 	}
-	observation, readErr := client.Read(verifyCtx, true)
+	observation, readErr := client.Read(verifyCtx, false)
 	_ = client.Close()
 	if readErr != nil || (observation.Authentication != domain.AgentAuthenticationAuthorized && observation.Authentication != domain.AgentAuthenticationNotApplicable) ||
 		!codexObservationMatchesAccount(record.Snapshot, observation) {
@@ -1790,7 +1793,7 @@ func (s *Service) CheckpointAndActivateCodexAccount(ctx context.Context, switchI
 			cancel()
 			return domain.CodexActiveAccount{}, apierr.Conflict("CODEX_GLOBAL_ACCOUNT_CHANGED", "The device Codex account could not be confirmed", nil)
 		}
-		observation, readErr := client.Read(verifyCtx, true)
+		observation, readErr := client.Read(verifyCtx, false)
 		_ = client.Close()
 		cancel()
 		if readErr != nil || !codexObservationMatchesAccount(record.Snapshot, observation) {
@@ -1864,7 +1867,7 @@ func (s *Service) RestoreCodexAccountCredential(ctx context.Context, sourceAccou
 	if err != nil {
 		return apierr.Unavailable("CODEX_ACCOUNT_SWITCH_ACTIVATION_UNCONFIRMED", "The previous Codex account could not be verified")
 	}
-	observation, readErr := client.Read(verifyCtx, true)
+	observation, readErr := client.Read(verifyCtx, false)
 	_ = client.Close()
 	if readErr != nil ||
 		(observation.Authentication != domain.AgentAuthenticationAuthorized && observation.Authentication != domain.AgentAuthenticationNotApplicable) ||

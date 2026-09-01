@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -33,7 +32,6 @@ var (
 	ErrCodexAccountSwitchIdempotencyConflict = ports.ErrCodexAccountSwitchIdempotencyConflict
 	// ErrCodexRunningSessionNotResumable blocks switching before credential mutation.
 	ErrCodexRunningSessionNotResumable = ports.ErrCodexRunningSessionNotResumable
-	errCodexAccountSwitchCancelled     = errors.New("codex account switch cancelled")
 )
 
 func codexAccountSwitchFingerprint(target string, revision int64) string {
@@ -335,9 +333,9 @@ func (m *Manager) runCodexAccountSwitch(ctx context.Context, credentials ports.C
 			releaseOperations()
 		}
 	}()
-	abortChatIntake, err := m.armCodexSwitchChatIntake(ctx, sessions)
+	abortChatIntake, err := m.armCodexSwitchChatInterrupt(ctx, sessions)
 	if err != nil {
-		m.failCodexAccountSwitch(ctx, store, &sw, "safe_boundary_failed")
+		m.failCodexAccountSwitch(ctx, store, &sw, "stop_unconfirmed")
 		return
 	}
 	chatStopped := false
@@ -346,33 +344,17 @@ func (m *Manager) runCodexAccountSwitch(ctx context.Context, credentials ports.C
 			abortChatIntake()
 		}
 	}()
-	if sw.Phase == domain.CodexAccountSwitchRequested {
-		if !m.advanceCodexAccountSwitch(ctx, store, &sw, domain.CodexAccountSwitchWaitingSafeBoundary, "") {
-			return
-		}
-	}
-	if sw.Phase != domain.CodexAccountSwitchWaitingSafeBoundary {
-		return
-	}
-	if err := m.waitForCodexAccountSafeBoundary(ctx, store, sw.ID, sessions); err != nil {
-		if errors.Is(err, errCodexAccountSwitchCancelled) {
-			return
-		}
-		m.failCodexAccountSwitch(ctx, store, &sw, "safe_boundary_failed")
-		return
-	}
-	if err := m.closeCodexAccountSwitchDecisionInputs(ctx, sw.ID, sessions); err != nil {
-		m.failCodexAccountSwitch(ctx, store, &sw, "safe_boundary_failed")
+	if sw.Phase != domain.CodexAccountSwitchRequested && sw.Phase != domain.CodexAccountSwitchWaitingSafeBoundary {
 		return
 	}
 	releaseTerminalInput, err := m.freezeCodexSwitchTerminalInput(ctx, sessions)
 	if err != nil {
-		m.failCodexAccountSwitch(ctx, store, &sw, "safe_boundary_failed")
+		m.failCodexAccountSwitch(ctx, store, &sw, "stop_unconfirmed")
 		return
 	}
 	defer releaseTerminalInput()
-	if err := m.prepareCodexSwitchChatDrain(ctx, sessions); err != nil {
-		m.failCodexAccountSwitch(ctx, store, &sw, "safe_boundary_failed")
+	if err := m.prepareCodexSwitchChatInterrupt(ctx, sessions); err != nil {
+		m.failCodexAccountSwitch(ctx, store, &sw, "stop_unconfirmed")
 		return
 	}
 	if current, ok, _ := store.GetCodexAccountSwitch(ctx, sw.ID); ok && current.Phase == domain.CodexAccountSwitchCancelled {
@@ -397,13 +379,6 @@ func (m *Manager) runCodexAccountSwitch(ctx context.Context, credentials ports.C
 	}
 	committedAt := m.clock()
 	sw.CredentialsCommittedAt = &committedAt
-	if !m.advanceCodexAccountSwitch(ctx, store, &sw, domain.CodexAccountSwitchVerifyingAccount, "") {
-		return
-	}
-	if err := credentials.VerifyCurrentCodexAccount(ctx, sw.TargetAccountID); err != nil {
-		m.advanceCodexAccountSwitch(ctx, store, &sw, domain.CodexAccountSwitchRecoveryRequired, "global_account_changed")
-		return
-	}
 	if !m.advanceCodexAccountSwitch(ctx, store, &sw, domain.CodexAccountSwitchRestartingSessions, "") {
 		return
 	}
@@ -669,100 +644,7 @@ func (m *Manager) rollbackCodexAccountSwitch(ctx context.Context, credentials po
 	m.advanceCodexAccountSwitch(ctx, store, sw, domain.CodexAccountSwitchFailed, code)
 }
 
-func (m *Manager) waitForCodexAccountSafeBoundary(ctx context.Context, store ports.CodexAccountSwitchStore, switchID string, sessions []domain.CodexAccountSwitchSession) error {
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-	reviewers := m.codexReviewerLifecycle()
-	for {
-		if current, ok, err := store.GetCodexAccountSwitch(ctx, switchID); err != nil {
-			return err
-		} else if ok && current.Phase == domain.CodexAccountSwitchCancelled {
-			return errCodexAccountSwitchCancelled
-		}
-		allSafe := true
-		for _, item := range sessions {
-			if item.WasRunning {
-				rec, ok, err := m.store.GetSession(ctx, item.SessionID)
-				if err != nil || !ok {
-					return errors.New("session unavailable")
-				}
-				if item.InterfaceMode == domain.SessionModeTUI && (rec.Activity.State == domain.ActivityWaitingInput || rec.Activity.State == domain.ActivityBlocked) {
-					m.allowCodexAccountSwitchDecisionInput(item.SessionID, switchID)
-				} else if err := m.closeCodexAccountSwitchDecisionInput(ctx, item.SessionID, switchID); err != nil {
-					return err
-				}
-				if rec.Activity.State == domain.ActivityActive || rec.Activity.State == domain.ActivityWaitingInput || rec.Activity.State == domain.ActivityBlocked {
-					allSafe = false
-					break
-				}
-			}
-			if item.ReviewerWasRunning {
-				if reviewers == nil {
-					return errors.New("codex reviewer lifecycle is unavailable")
-				}
-				busy, err := reviewers.CodexReviewerBusy(ctx, item.SessionID)
-				if err != nil {
-					return err
-				}
-				if busy {
-					allSafe = false
-					break
-				}
-			}
-		}
-		if allSafe {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
-}
-
-func (m *Manager) allowCodexAccountSwitchDecisionInput(id domain.SessionID, switchID string) {
-	m.agentOpMu.Lock()
-	defer m.agentOpMu.Unlock()
-	if m.agentOperations[id] != agentOperationCodexAccountSwitch {
-		return
-	}
-	if m.codexAccountSwitchDecisionInput == nil {
-		m.codexAccountSwitchDecisionInput = make(map[domain.SessionID]string)
-	}
-	m.codexAccountSwitchDecisionInput[id] = switchID
-}
-
-func (m *Manager) closeCodexAccountSwitchDecisionInput(ctx context.Context, id domain.SessionID, switchID string) error {
-	m.agentOpMu.Lock()
-	if current, ok := m.codexAccountSwitchDecisionInput[id]; !ok || current != switchID {
-		m.agentOpMu.Unlock()
-		return nil
-	}
-	delete(m.codexAccountSwitchDecisionInput, id)
-	drained := m.inputDrained[id]
-	m.agentOpMu.Unlock()
-	if drained == nil {
-		return nil
-	}
-	select {
-	case <-drained:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (m *Manager) closeCodexAccountSwitchDecisionInputs(ctx context.Context, switchID string, sessions []domain.CodexAccountSwitchSession) error {
-	for _, item := range sessions {
-		if err := m.closeCodexAccountSwitchDecisionInput(ctx, item.SessionID, switchID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (m *Manager) armCodexSwitchChatIntake(ctx context.Context, sessions []domain.CodexAccountSwitchSession) (func(), error) {
+func (m *Manager) armCodexSwitchChatInterrupt(ctx context.Context, sessions []domain.CodexAccountSwitchSession) (func(), error) {
 	handoff, ok := m.chat.(chatHandoffLauncher)
 	if !ok {
 		for _, item := range sessions {
@@ -777,7 +659,7 @@ func (m *Manager) armCodexSwitchChatIntake(ctx context.Context, sessions []domai
 		if !item.WasRunning || item.InterfaceMode != domain.SessionModeChat {
 			continue
 		}
-		if err := handoff.ArmChatHandoff(ctx, item.SessionID, domain.SessionInterfaceTransitionDrain); err != nil {
+		if err := handoff.ArmChatHandoff(ctx, item.SessionID, domain.SessionInterfaceTransitionInterrupt); err != nil {
 			for _, id := range armed {
 				handoff.AbortChatHandoff(id)
 			}
@@ -792,14 +674,14 @@ func (m *Manager) armCodexSwitchChatIntake(ctx context.Context, sessions []domai
 	}, nil
 }
 
-func (m *Manager) prepareCodexSwitchChatDrain(ctx context.Context, sessions []domain.CodexAccountSwitchSession) error {
+func (m *Manager) prepareCodexSwitchChatInterrupt(ctx context.Context, sessions []domain.CodexAccountSwitchSession) error {
 	handoff, ok := m.chat.(chatHandoffLauncher)
 	if !ok {
 		return nil
 	}
 	for _, item := range sessions {
 		if item.WasRunning && item.InterfaceMode == domain.SessionModeChat {
-			if err := handoff.PrepareChatHandoff(ctx, item.SessionID, domain.SessionInterfaceTransitionDrain); err != nil {
+			if err := handoff.PrepareChatHandoff(ctx, item.SessionID, domain.SessionInterfaceTransitionInterrupt); err != nil {
 				return err
 			}
 		}
@@ -826,13 +708,9 @@ func (m *Manager) freezeCodexSwitchTerminalInput(ctx context.Context, sessions [
 			}
 			return func() {}, ErrNotFound
 		}
-		lastInputAt, release := m.beginTerminalInputDrain(rec)
+		_, release := m.beginTerminalInputDrain(rec)
 		if release != nil {
 			releases = append(releases, release)
-		}
-		if rec.Activity.State == domain.ActivityActive || rec.Activity.State == domain.ActivityBlocked || lastInputAt.After(rec.Activity.LastActivityAt) {
-			releaseAll()
-			return func() {}, errors.New("codex terminal activity changed at the switch boundary")
 		}
 	}
 	return releaseAll, nil
