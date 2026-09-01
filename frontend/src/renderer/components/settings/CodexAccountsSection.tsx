@@ -480,16 +480,16 @@ function AccountActivity({ usage, locale }: { usage: UsageSummaryValue | null | 
 	return (
 		<section aria-labelledby="codex-account-activity-heading">
 			<h4 id="codex-account-activity-heading" className="mb-2 font-medium text-foreground">{t("settings.codexAccounts.activity")}</h4>
-			<div className="overflow-x-auto rounded-md border border-border/70 bg-muted/15">
+			<div className="rounded-md border border-border/70 bg-muted/15">
 				<div
 					data-testid="codex-account-activity-metrics"
 					className="grid divide-x divide-border/70"
-					style={{ gridTemplateColumns: `repeat(${metrics.length}, minmax(8.5rem, 1fr))`, minWidth: `${metrics.length * 8.5}rem` }}
+					style={{ gridTemplateColumns: `repeat(${metrics.length}, minmax(0, 1fr))` }}
 				>
 					{metrics.map((metric) => (
-						<div key={metric.label} className="px-4 py-3 text-center">
-							<p className="text-sm font-semibold tabular-nums text-foreground">{metric.value}</p>
-							<p className="mt-0.5 whitespace-nowrap text-muted-foreground">{metric.label}</p>
+						<div key={metric.label} className="min-w-0 px-2 py-2.5 text-center">
+							<p className="truncate text-[13px] font-semibold leading-5 tabular-nums text-foreground" title={metric.value}>{metric.value}</p>
+							<p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{metric.label}</p>
 						</div>
 					))}
 				</div>

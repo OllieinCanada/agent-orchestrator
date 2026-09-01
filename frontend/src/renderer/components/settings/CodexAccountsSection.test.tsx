@@ -148,7 +148,10 @@ it("presents plan, general and model usage limits with remaining-capacity meters
 	expect(screen.getByText("7h 19m")).toBeInTheDocument();
 	expect(screen.getByText("2 days")).toBeInTheDocument();
 	expect(screen.getByText("99 days")).toBeInTheDocument();
-	expect(screen.getByTestId("codex-account-activity-metrics").children).toHaveLength(5);
+	const activityMetrics = screen.getByTestId("codex-account-activity-metrics");
+	expect(activityMetrics.children).toHaveLength(5);
+	expect(activityMetrics).toHaveStyle({ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" });
+	expect(activityMetrics.parentElement).not.toHaveClass("overflow-x-auto");
 	expect(screen.queryByText("19% used")).not.toBeInTheDocument();
 	expect(screen.queryByText("54571452296")).not.toBeInTheDocument();
 });
