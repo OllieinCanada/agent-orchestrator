@@ -65,6 +65,23 @@ export async function recoverCodexAccountSwitch(switchId: string): Promise<Codex
 
 export function cacheCodexAccounts(queryClient: QueryClient, next: CodexAccountsResponse): void { queryClient.setQueryData(codexAccountsQueryKey, next); }
 
+export function mergeCodexAccounts(queryClient: QueryClient, next: CodexAccountsResponse): void {
+	queryClient.setQueryData<CodexAccountsResponse>(codexAccountsQueryKey, (current) => {
+		if (!current) return next;
+		const refreshed = new Map(next.accounts.map((account) => [account.id, account]));
+		const accounts = current.accounts
+			.filter((account) => !refreshed.has(account.id))
+			.concat(next.accounts)
+			.map((account) => ({ ...account, active: account.id === next.activeAccountId }));
+		accounts.sort((left, right) => {
+			if (left.active !== right.active) return left.active ? -1 : 1;
+			const created = left.createdAt.localeCompare(right.createdAt);
+			return created || left.id.localeCompare(right.id);
+		});
+		return { ...current, ...next, accounts };
+	});
+}
+
 export function cacheCodexAccount(queryClient: QueryClient, account: CodexAccount): void {
 	queryClient.setQueryData<CodexAccountsResponse>(codexAccountsQueryKey, (current) => {
 		if (!current) return current;

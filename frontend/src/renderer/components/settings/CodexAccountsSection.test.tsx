@@ -70,6 +70,34 @@ it("shows active-first account cards with correct remaining capacity", async () 
 	expect(screen.queryByText(/billing/i)).not.toBeInTheDocument();
 });
 
+it("preserves the complete account list when expanding accounts performs targeted ensures", async () => {
+	postMock.mockImplementation((path: string, request?: { body?: { accountIds?: string[] } }) => {
+		if (path !== "/api/v1/agents/codex/accounts/ensure") return Promise.resolve({ data: {} });
+		const ids = request?.body?.accountIds ?? [];
+		if (ids.length === 0) return Promise.resolve({ data: accountResponse });
+		return Promise.resolve({ data: { ...accountResponse, accounts: accountResponse.accounts.filter((account) => ids.includes(account.id)) } });
+	});
+	const { container } = renderSection();
+	expect(await screen.findByText("active@example.com")).toBeInTheDocument();
+	expect(screen.getByText("other@example.com")).toBeInTheDocument();
+
+	fireEvent.click(container.querySelector(`[data-account-id="${activeAccount.id}"] button`) as HTMLButtonElement);
+	await waitFor(() => expect(postMock).toHaveBeenCalledWith(
+		"/api/v1/agents/codex/accounts/ensure",
+		{ body: { accountIds: [activeAccount.id], includeUsage: true } },
+	));
+	expect(screen.getByText("active@example.com")).toBeInTheDocument();
+	expect(screen.getByText("other@example.com")).toBeInTheDocument();
+
+	fireEvent.click(container.querySelector(`[data-account-id="${inactiveAccount.id}"] button`) as HTMLButtonElement);
+	await waitFor(() => expect(postMock).toHaveBeenCalledWith(
+		"/api/v1/agents/codex/accounts/ensure",
+		{ body: { accountIds: [inactiveAccount.id], includeUsage: true } },
+	));
+	expect(screen.getByText("active@example.com")).toBeInTheDocument();
+	expect(screen.getByText("other@example.com")).toBeInTheDocument();
+});
+
 it("does not offer switching when the device account has no reconciled source", async () => {
 	const unreconciledAccount = { ...activeAccount, active: false };
 	const unreconciledResponse = {

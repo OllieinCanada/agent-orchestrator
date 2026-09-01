@@ -10,6 +10,7 @@ import {
 	consumeCodexAccountResetCredit,
 	ensureCodexAccounts,
 	fetchCodexAccounts,
+	mergeCodexAccounts,
 	openCodexAccountLoginTerminal,
 	recoverCodexAccountSwitch,
 	startCodexAccountSwitch,
@@ -153,7 +154,7 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 		setExpandedAccount(opening ? account.id : null);
 		if (!opening) return;
 		void ensureCodexAccounts([account.id], true)
-			.then((next) => cacheCodexAccounts(queryClient, next))
+			.then((next) => mergeCodexAccounts(queryClient, next))
 			.catch(() => undefined);
 	}, [expandedAccount, queryClient]);
 
