@@ -138,15 +138,9 @@ func (d *Driver) Probe(ctx context.Context) (ports.ChatCapabilities, error) {
 		return nil, fmt.Errorf("%w: %w", ports.ErrChatDriverUnavailable, err)
 	}
 
-	// An unknown auth result is not proof of failure — the same rule AO already
-	// applies to runtime probes. Only an explicit unauthorized blocks creation.
-	status, err := d.plugin.AuthStatus(ctx)
-	if err == nil && status == ports.AgentAuthStatusUnauthorized {
-		return nil, ports.ErrChatAuthRequired
-	}
-	if err != nil {
-		d.log.Debug("codex auth probe inconclusive; continuing", "error", err)
-	}
+	// Authentication is owned by the daemon's active-account readiness check.
+	// Probing the ambient device home here would reject a valid AO account (or
+	// admit a different device account) before the managed runtime is launched.
 	versionProbe := d.versionProbe
 	if versionProbe == nil {
 		versionProbe = installedCodexVersion
@@ -346,10 +340,17 @@ func (d *Driver) connect(ctx context.Context, workdir string, env map[string]str
 	}
 
 	conv := newConversation(proc, d.log)
+	if err := initializeConnection(ctx, conv.conn); err != nil {
+		_ = conv.Close()
+		return nil, err
+	}
+	return conv, nil
+}
 
+func initializeConnection(ctx context.Context, connection *conn) error {
 	initCtx, cancel := context.WithTimeout(ctx, handshakeTimeout)
 	defer cancel()
-	if err := conv.conn.request(initCtx, "initialize", map[string]any{
+	if err := connection.request(initCtx, "initialize", map[string]any{
 		"clientInfo": map[string]any{
 			"name":    clientName,
 			"title":   clientTitle,
@@ -360,16 +361,13 @@ func (d *Driver) connect(ctx context.Context, workdir string, env map[string]str
 			"optOutNotificationMethods": nil,
 		},
 	}, nil); err != nil {
-		_ = conv.Close()
 		// A handshake the provider rejects means a protocol AO cannot speak.
-		return nil, fmt.Errorf("%w: initialize: %w", ports.ErrChatDriverIncompatible, err)
+		return fmt.Errorf("%w: initialize: %w", ports.ErrChatDriverIncompatible, err)
 	}
-
-	if err := conv.conn.notify("initialized", nil); err != nil {
-		_ = conv.Close()
-		return nil, fmt.Errorf("notify initialized: %w", err)
+	if err := connection.notify("initialized", nil); err != nil {
+		return fmt.Errorf("notify initialized: %w", err)
 	}
-	return conv, nil
+	return nil
 }
 
 // approvalSettings maps AO's existing per-session permission mode onto Codex's
@@ -394,7 +392,8 @@ func approvalSettings(mode ports.PermissionMode) (policy, sandbox string) {
 
 // spawnAppServer is the real launcher.
 func spawnAppServer(ctx context.Context, bin, workdir string, env []string) (*process, error) {
-	cmd := aoprocess.Command(bin, "app-server")
+	args := []string{"app-server"}
+	cmd := aoprocess.Command(bin, args...)
 	cmd.Dir = workdir
 	if len(env) > 0 {
 		cmd.Env = env
