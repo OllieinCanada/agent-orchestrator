@@ -19,16 +19,18 @@ import (
 )
 
 type fakeCodexAccounts struct {
-	result             agentsvc.CodexAccounts
-	ensureIDs          []string
-	includeUsage       bool
-	events             chan agentsvc.CodexAccounts
-	loginStart         agentsvc.CodexAccountLoginTerminalStart
-	verifiedOperation  string
-	cancelledOperation string
-	switchConfig       ports.CodexAccountSwitchConfig
-	switchResult       domain.CodexAccountSwitch
-	switchErr          error
+	result              agentsvc.CodexAccounts
+	ensureIDs           []string
+	includeUsage        bool
+	resetAccountID      string
+	resetIdempotencyKey string
+	events              chan agentsvc.CodexAccounts
+	loginStart          agentsvc.CodexAccountLoginTerminalStart
+	verifiedOperation   string
+	cancelledOperation  string
+	switchConfig        ports.CodexAccountSwitchConfig
+	switchResult        domain.CodexAccountSwitch
+	switchErr           error
 }
 
 func (f *fakeCodexAccounts) CachedCodexAccounts(context.Context) (agentsvc.CodexAccounts, error) {
@@ -36,6 +38,10 @@ func (f *fakeCodexAccounts) CachedCodexAccounts(context.Context) (agentsvc.Codex
 }
 func (f *fakeCodexAccounts) EnsureCodexAccounts(_ context.Context, ids []string, includeUsage bool) (agentsvc.CodexAccounts, error) {
 	f.ensureIDs, f.includeUsage = ids, includeUsage
+	return f.result, nil
+}
+func (f *fakeCodexAccounts) ConsumeCodexAccountResetCredit(_ context.Context, accountID, idempotencyKey string) (agentsvc.CodexAccounts, error) {
+	f.resetAccountID, f.resetIdempotencyKey = accountID, idempotencyKey
 	return f.result, nil
 }
 func (f *fakeCodexAccounts) SubscribeCodexAccounts(ctx context.Context) (<-chan agentsvc.CodexAccounts, error) {
@@ -85,7 +91,7 @@ func codexAccountsFixture() agentsvc.CodexAccounts {
 			AuthMethod:     domain.CodexAuthMethodChatGPT,
 			Capacity:       domain.CodexCapacitySnapshot{State: domain.CodexCapacityAvailable, Freshness: domain.AgentReadinessFresh, UsedPercent: &used, RemainingPercent: &remaining, ReasonCode: domain.CodexCapacityReasonAvailable, Reason: "available", AdditionalBuckets: []domain.CodexCapacityBucket{}},
 		}},
-		Capabilities: domain.CodexAccountCapabilities{AccountRead: supported, NativeLogin: supported, CapacityRead: supported, UsageRead: supported, ThreadResume: supported, AccountManagement: supported, GlobalSwitch: supported},
+		Capabilities: domain.CodexAccountCapabilities{AccountRead: supported, NativeLogin: supported, CapacityRead: supported, UsageRead: supported, ResetCreditConsume: supported, ThreadResume: supported, AccountManagement: supported, GlobalSwitch: supported},
 	}
 }
 
@@ -142,6 +148,20 @@ func TestCodexAccountLoginTerminalAndVerificationRoutesExposeNoCommandOrPath(t *
 	_, status, _ = doRequest(t, srv, http.MethodPost, "/api/v1/agents/codex/accounts/login-operations/op-1/verify", "")
 	if status != http.StatusOK || fake.verifiedOperation != "op-1" {
 		t.Fatalf("verify status=%d id=%q", status, fake.verifiedOperation)
+	}
+}
+
+func TestCodexAccountResetCreditRouteRequiresIdempotencyAndReturnsRefreshedAccounts(t *testing.T) {
+	fake := &fakeCodexAccounts{result: codexAccountsFixture()}
+	srv := newCodexAccountServer(t, fake)
+	defer srv.Close()
+	body, status, _ := doRequest(t, srv, http.MethodPost, "/api/v1/agents/codex/accounts/account-1/reset-credit/consume", `{"idempotencyKey":""}`)
+	if status != http.StatusBadRequest || !strings.Contains(string(body), `"code":"IDEMPOTENCY_KEY_REQUIRED"`) {
+		t.Fatalf("missing key status=%d body=%s", status, body)
+	}
+	body, status, _ = doRequest(t, srv, http.MethodPost, "/api/v1/agents/codex/accounts/account-1/reset-credit/consume", `{"idempotencyKey":"reset-request-1"}`)
+	if status != http.StatusOK || fake.resetAccountID != "account-1" || fake.resetIdempotencyKey != "reset-request-1" || !strings.Contains(string(body), `"accountRevision":3`) {
+		t.Fatalf("reset status=%d account=%q key=%q body=%s", status, fake.resetAccountID, fake.resetIdempotencyKey, body)
 	}
 }
 

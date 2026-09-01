@@ -52,6 +52,10 @@ type fakeCodexAccountClient struct {
 	capacityStarted chan struct{}
 	capacityRelease chan struct{}
 	usage           ports.CodexUsageObservation
+	resetOutcome    domain.CodexResetCreditOutcome
+	resetErr        error
+	resetKeys       []string
+	resetFn         func(string) (domain.CodexResetCreditOutcome, error)
 	events          chan ports.CodexAccountEvent
 }
 
@@ -94,6 +98,13 @@ func (c *fakeCodexAccountClient) ReadCapacity(ctx context.Context) (ports.CodexC
 
 func (c *fakeCodexAccountClient) ReadUsage(context.Context) (ports.CodexUsageObservation, error) {
 	return c.usage, nil
+}
+func (c *fakeCodexAccountClient) ConsumeResetCredit(_ context.Context, idempotencyKey string) (domain.CodexResetCreditOutcome, error) {
+	c.resetKeys = append(c.resetKeys, idempotencyKey)
+	if c.resetFn != nil {
+		return c.resetFn(idempotencyKey)
+	}
+	return c.resetOutcome, c.resetErr
 }
 func (c *fakeCodexAccountClient) Events() <-chan ports.CodexAccountEvent {
 	if c.events == nil {
@@ -163,7 +174,7 @@ func supportedCodexAccountCapabilities() domain.CodexAccountCapabilities {
 	supported := domain.CodexCapabilityObservation{State: domain.CodexCapabilitySupported, ReasonCode: domain.CodexCapabilityReasonSupported, Reason: "supported"}
 	return domain.CodexAccountCapabilities{
 		AccountRead: supported, NativeLogin: supported, CapacityRead: supported,
-		UsageRead: supported, ThreadResume: supported, AccountManagement: supported, GlobalSwitch: supported,
+		UsageRead: supported, ResetCreditConsume: supported, ThreadResume: supported, AccountManagement: supported, GlobalSwitch: supported,
 	}
 }
 
@@ -535,6 +546,41 @@ func TestCredentialActivationDoesNotOverwriteExternalRace(t *testing.T) {
 	}
 	if state.active.AccountID != source.Snapshot.ID || state.active.Revision != 1 {
 		t.Fatalf("active pointer changed during race: %#v", state.active)
+	}
+}
+
+func TestConsumeResetCreditVerifiesAvailabilityAndRefreshesCapacity(t *testing.T) {
+	now := time.Now().UTC()
+	available := &domain.CodexResetCreditsSummary{AvailableCount: 1}
+	client := &fakeCodexAccountClient{
+		read: ports.CodexAccountObservation{Authentication: domain.AgentAuthenticationAuthorized, Method: domain.CodexAuthMethodChatGPT},
+		capacity: ports.CodexCapacityObservation{
+			ObservedAt:   now,
+			Overall:      &domain.CodexCapacityBucket{LimitID: "codex", Reached: domain.CodexCapacityReached, Primary: &domain.CodexCapacityWindow{UsedPercent: 100}},
+			ResetCredits: available,
+		},
+	}
+	client.resetFn = func(string) (domain.CodexResetCreditOutcome, error) {
+		client.capacity = ports.CodexCapacityObservation{
+			ObservedAt:   now.Add(time.Second),
+			Overall:      &domain.CodexCapacityBucket{LimitID: "codex", Reached: domain.CodexCapacityNotReached, Primary: &domain.CodexCapacityWindow{UsedPercent: 0}},
+			ResetCredits: &domain.CodexResetCreditsSummary{AvailableCount: 0},
+		}
+		return domain.CodexResetCreditReset, nil
+	}
+	factory := &fakeCodexAccountFactory{capabilities: supportedCodexAccountCapabilities(), open: func(ports.CodexAccountContext) (ports.CodexAccountClient, error) { return client, nil }}
+	manager := newTestCodexAccountManager(t, factory, nil)
+	manager.catalog.newID = func() string { return testAccountID }
+	record := commitTestAccount(t, manager.catalog, manager.pendingRoot, "b60a377d-da68-4a61-86f2-f31f04c571f2", ports.CodexAccountObservation{Authentication: domain.AgentAuthenticationAuthorized, Method: domain.CodexAuthMethodChatGPT})
+	if err := manager.consumeResetCredit(context.Background(), record.Snapshot.ID, "reset-request-1"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(client.resetKeys, []string{"reset-request-1"}) {
+		t.Fatalf("reset keys = %#v", client.resetKeys)
+	}
+	snapshot := manager.capacity.snapshot(record.Snapshot.ID)
+	if snapshot.State != domain.CodexCapacityAvailable || snapshot.RemainingPercent == nil || *snapshot.RemainingPercent != 100 || snapshot.ResetCredits == nil || snapshot.ResetCredits.AvailableCount != 0 {
+		t.Fatalf("capacity after reset = %#v", snapshot)
 	}
 }
 

@@ -119,7 +119,7 @@ func TestAccountFactoryDeviceDetectionDoesNotOverrideCredentialStore(t *testing.
 	}
 }
 
-func TestAccountClientReadsProfileCapacityWithoutUsageOrResetCreditCalls(t *testing.T) {
+func TestAccountClientReadsCapacityAndNormalizesResetCredits(t *testing.T) {
 	serverReads, clientWrites := io.Pipe()
 	clientReads, serverWrites := io.Pipe()
 	factory := NewAccountFactory(fakePlugin{bin: "codex"}, nil)
@@ -131,7 +131,7 @@ func TestAccountClientReadsProfileCapacityWithoutUsageOrResetCreditCalls(t *test
 		"account/rateLimits/read": map[string]any{
 			"rateLimits":            map[string]any{"limitId": "codex", "planType": "pro", "primary": map[string]any{"usedPercent": 81}},
 			"rateLimitsByLimitId":   map[string]any{"spark": map[string]any{"limitId": "spark", "primary": map[string]any{"usedPercent": 20}}},
-			"rateLimitResetCredits": map[string]any{"availableCount": 99},
+			"rateLimitResetCredits": map[string]any{"availableCount": 2, "credits": []map[string]any{{"id": "opaque", "grantedAt": 1, "expiresAt": 4102444800, "resetType": "codexRateLimits", "status": "available"}}},
 		},
 	})
 	client, err := factory.Open(context.Background(), ports.CodexAccountContext{Home: t.TempDir()})
@@ -149,6 +149,31 @@ func TestAccountClientReadsProfileCapacityWithoutUsageOrResetCreditCalls(t *test
 	if len(capacity.AdditionalBuckets) != 1 || capacity.AdditionalBuckets[0].LimitID != "spark" {
 		t.Fatalf("additional buckets = %#v", capacity.AdditionalBuckets)
 	}
+	if capacity.ResetCredits == nil || capacity.ResetCredits.AvailableCount != 2 || capacity.ResetCredits.NearestExpiresAt == nil {
+		t.Fatalf("reset credits = %#v", capacity.ResetCredits)
+	}
+}
+
+func TestAccountClientConsumesResetCreditIdempotently(t *testing.T) {
+	serverReads, clientWrites := io.Pipe()
+	clientReads, serverWrites := io.Pipe()
+	factory := NewAccountFactory(fakePlugin{bin: "codex"}, nil)
+	factory.spawn = func(context.Context, string, string, []string, []string) (*process, error) {
+		return &process{stdin: clientWrites, stdout: clientReads, stop: func() error { return serverWrites.Close() }}, nil
+	}
+	go serveAccountTestProtocol(serverReads, serverWrites, map[string]any{
+		"initialize": map[string]any{},
+		codexproto.MethodAccountRateLimitResetCreditConsume: map[string]any{"outcome": "reset"},
+	})
+	client, err := factory.Open(context.Background(), ports.CodexAccountContext{Home: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	outcome, err := client.ConsumeResetCredit(context.Background(), "reset-request-1")
+	if err != nil || outcome != domain.CodexResetCreditReset {
+		t.Fatalf("outcome=%q err=%v", outcome, err)
+	}
 }
 
 func TestInspectCodexSchemaDirectoryMapsSupportedUnsupportedAndUnreadable(t *testing.T) {
@@ -157,6 +182,7 @@ func TestInspectCodexSchemaDirectoryMapsSupportedUnsupportedAndUnreadable(t *tes
 		codexproto.MethodAccountRead,
 		codexproto.MethodAccountRateLimitsRead,
 		codexproto.MethodAccountUsageRead,
+		codexproto.MethodAccountRateLimitResetCreditConsume,
 		codexproto.MethodThreadResume,
 		codexproto.MethodAccountUpdated,
 	}
@@ -169,21 +195,21 @@ func TestInspectCodexSchemaDirectoryMapsSupportedUnsupportedAndUnreadable(t *tes
 		t.Fatal(err)
 	}
 	capabilities := inspectCodexSchemaDirectory(dir)
-	if capabilities.AccountRead.State != domain.CodexCapabilitySupported || capabilities.CapacityRead.State != domain.CodexCapabilitySupported || capabilities.UsageRead.State != domain.CodexCapabilitySupported || capabilities.ThreadResume.State != domain.CodexCapabilitySupported {
+	if capabilities.AccountRead.State != domain.CodexCapabilitySupported || capabilities.CapacityRead.State != domain.CodexCapabilitySupported || capabilities.UsageRead.State != domain.CodexCapabilitySupported || capabilities.ResetCreditConsume.State != domain.CodexCapabilitySupported || capabilities.ThreadResume.State != domain.CodexCapabilitySupported {
 		t.Fatalf("supported capabilities = %#v", capabilities)
 	}
 	if err := os.WriteFile(path, []byte(`{"methods":["account/read"]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	capabilities = inspectCodexSchemaDirectory(dir)
-	if capabilities.AccountRead.State != domain.CodexCapabilitySupported || capabilities.CapacityRead.State != domain.CodexCapabilityUnsupported || capabilities.UsageRead.State != domain.CodexCapabilityUnsupported || capabilities.ThreadResume.State != domain.CodexCapabilityUnsupported {
+	if capabilities.AccountRead.State != domain.CodexCapabilitySupported || capabilities.CapacityRead.State != domain.CodexCapabilityUnsupported || capabilities.UsageRead.State != domain.CodexCapabilityUnsupported || capabilities.ResetCreditConsume.State != domain.CodexCapabilityUnsupported || capabilities.ThreadResume.State != domain.CodexCapabilityUnsupported {
 		t.Fatalf("read-only capabilities = %#v", capabilities)
 	}
 	if err := os.WriteFile(path, []byte(`not-json "account/read"`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	capabilities = inspectCodexSchemaDirectory(dir)
-	if capabilities.AccountRead.State != domain.CodexCapabilityUnknown || capabilities.CapacityRead.State != domain.CodexCapabilityUnknown || capabilities.UsageRead.State != domain.CodexCapabilityUnknown || capabilities.ThreadResume.State != domain.CodexCapabilityUnknown {
+	if capabilities.AccountRead.State != domain.CodexCapabilityUnknown || capabilities.CapacityRead.State != domain.CodexCapabilityUnknown || capabilities.UsageRead.State != domain.CodexCapabilityUnknown || capabilities.ResetCreditConsume.State != domain.CodexCapabilityUnknown || capabilities.ThreadResume.State != domain.CodexCapabilityUnknown {
 		t.Fatalf("unreadable capabilities = %#v", capabilities)
 	}
 }

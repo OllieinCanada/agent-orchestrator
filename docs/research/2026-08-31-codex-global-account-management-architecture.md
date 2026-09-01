@@ -196,11 +196,11 @@ SQLite contains only:
 - `codex_account_switches` — idempotent phase journal and safe failure facts;
 - `codex_account_switch_sessions` — AO session stop/restart progress with private native/controller fields redacted from APIs.
 
-SQLite never contains credential bytes, filesystem paths, email, plan, capacity, reset times, usage payloads, terminal output, or native history. Authentication, capacity, usage, and unmanaged-global observations remain daemon-memory state.
+SQLite never contains credential bytes, filesystem paths, email, plan, capacity, reset times, reset-credit facts, usage payloads, terminal output, or native history. Authentication, capacity, usage, reset-credit summaries, and unmanaged-global observations remain daemon-memory state.
 
 ## API and UI
 
-The daemon exposes cached account reads, explicit ensure, inline login create/verify/cancel, global switch start/read/cancel/recover, and one latest-wins SSE stream. Cached reads do no filesystem or Codex work.
+The daemon exposes cached account reads, explicit ensure, inline login create/verify/cancel, global switch start/read/cancel/recover, confirmed reset-credit consumption, and one latest-wins SSE stream. Cached reads do no filesystem or Codex work. Reset-credit responses expose only the available count and nearest expiry; opaque provider identifiers remain private, and consumption uses a client idempotency key before refreshing capacity.
 
 Settings shows the device's current Codex account, account usage details, inline login, and switch progress. Switching blocks interaction only for affected AO Codex sessions. There is no Task Composer account selector, per-session account binding, assisted switching, or automatic switching.
 
@@ -212,4 +212,4 @@ Settings shows the device's current Codex account, account usage details, inline
 - Per-session profiles or bindings.
 - Assisted or automatic switching.
 - Account deletion, logout, rename, reorder, or replacement.
-- Credential parsing, billing scraping, reset-credit actions, or historical capacity persistence.
+- Credential parsing, billing scraping, raw reset-credit payloads, or historical capacity persistence.

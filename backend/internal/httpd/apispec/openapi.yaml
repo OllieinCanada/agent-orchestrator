@@ -340,6 +340,57 @@ paths:
       summary: Return cached AO Codex accounts and active-account state
       tags:
       - agents
+  /api/v1/agents/codex/accounts/{accountId}/reset-credit/consume:
+    post:
+      operationId: consumeCodexAccountResetCredit
+      parameters:
+      - description: AO Codex account identifier.
+        in: path
+        name: accountId
+        required: true
+        schema:
+          description: AO Codex account identifier.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsumeCodexAccountResetCreditRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodexAccountsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Consume one provider-reported Codex usage-limit reset credit
+      tags:
+      - agents
   /api/v1/agents/codex/accounts/ensure:
     post:
       operationId: ensureCodexAccounts
@@ -6500,6 +6551,8 @@ components:
           $ref: '#/components/schemas/CodexCapabilityObservation'
         nativeLogin:
           $ref: '#/components/schemas/CodexCapabilityObservation'
+        resetCreditConsume:
+          $ref: '#/components/schemas/CodexCapabilityObservation'
         threadResume:
           $ref: '#/components/schemas/CodexCapabilityObservation'
         usageRead:
@@ -6509,6 +6562,7 @@ components:
       - nativeLogin
       - capacityRead
       - usageRead
+      - resetCreditConsume
       - threadResume
       - accountManagement
       - globalSwitch
@@ -6719,9 +6773,21 @@ components:
           type:
           - "null"
           - integer
+        longestRunningTurnSeconds:
+          type:
+          - "null"
+          - integer
+        longestStreakDays:
+          type:
+          - "null"
+          - integer
         observedAt:
           format: date-time
           type: string
+        peakDailyTokens:
+          type:
+          - "null"
+          - integer
       required:
       - observedAt
       type: object
@@ -6829,6 +6895,8 @@ components:
           type:
           - "null"
           - number
+        resetCredits:
+          $ref: '#/components/schemas/CodexResetCreditsSummary'
         resetsAt:
           format: date-time
           type:
@@ -6873,6 +6941,20 @@ components:
           - integer
       required:
       - usedPercent
+      type: object
+    CodexResetCreditsSummary:
+      properties:
+        availableCount:
+          format: int64
+          minimum: 0
+          type: integer
+        nearestExpiresAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+      required:
+      - availableCount
       type: object
     CodexUnmanagedGlobalAccount:
       properties:
@@ -6932,6 +7014,15 @@ components:
       - totalTokens
       - incomplete
       - estimatedCost
+      type: object
+    ConsumeCodexAccountResetCreditRequest:
+      properties:
+        idempotencyKey:
+          maxLength: 200
+          minLength: 1
+          type: string
+      required:
+      - idempotencyKey
       type: object
     ContainerReapConfig:
       properties:

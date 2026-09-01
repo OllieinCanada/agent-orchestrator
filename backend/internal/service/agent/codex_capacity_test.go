@@ -178,6 +178,7 @@ func TestSparseCodexCapacityEventPreservesAdditionalBuckets(t *testing.T) {
 		Plan:              testStringPointer("pro"),
 		Overall:           &domain.CodexCapacityBucket{LimitID: "codex", Reached: domain.CodexCapacityNotReached, Primary: &domain.CodexCapacityWindow{UsedPercent: 40}},
 		AdditionalBuckets: []domain.CodexCapacityBucket{{LimitID: "spark", Reached: domain.CodexCapacityNotReached, Primary: &domain.CodexCapacityWindow{UsedPercent: 10}}},
+		ResetCredits:      &domain.CodexResetCreditsSummary{AvailableCount: 2},
 	}, now, now)
 	later := now.Add(time.Minute)
 	merged := mergeCapacityObservation(current, ports.CodexCapacityObservation{
@@ -190,6 +191,9 @@ func TestSparseCodexCapacityEventPreservesAdditionalBuckets(t *testing.T) {
 	}
 	if len(merged.AdditionalBuckets) != 1 || merged.AdditionalBuckets[0].LimitID != "spark" {
 		t.Fatalf("sparse merge erased additional buckets: %#v", merged.AdditionalBuckets)
+	}
+	if merged.ResetCredits == nil || merged.ResetCredits.AvailableCount != 2 {
+		t.Fatalf("sparse merge erased reset credits: %#v", merged.ResetCredits)
 	}
 	if merged.State != domain.CodexCapacityNearLimit || merged.UsedPercent == nil || *merged.UsedPercent != 81 {
 		t.Fatalf("merged headline = %#v", merged)

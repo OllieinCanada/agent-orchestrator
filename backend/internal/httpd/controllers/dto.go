@@ -1069,6 +1069,12 @@ type EnsureCodexAccountsRequest struct {
 	IncludeUsage bool     `json:"includeUsage,omitempty"`
 }
 
+// ConsumeCodexAccountResetCreditRequest identifies one idempotent provider
+// reset attempt. The provider selects the available reset credit.
+type ConsumeCodexAccountResetCreditRequest struct {
+	IdempotencyKey string `json:"idempotencyKey" minLength:"1" maxLength:"200"`
+}
+
 // OpenCodexAccountLoginTerminalResponse is the standalone terminal opened for
 // one pending account's native Codex login flow.
 type OpenCodexAccountLoginTerminalResponse struct {

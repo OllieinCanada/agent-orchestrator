@@ -24,6 +24,15 @@ export async function ensureCodexAccounts(accountIds: string[] = [], includeUsag
 	return data as CodexAccountsResponse;
 }
 
+export async function consumeCodexAccountResetCredit(accountId: string, idempotencyKey: string): Promise<CodexAccountsResponse> {
+	const { data, error } = await apiClient.POST("/api/v1/agents/codex/accounts/{accountId}/reset-credit/consume", {
+		params: { path: { accountId } },
+		body: { idempotencyKey },
+	});
+	if (error) throw new Error(apiErrorMessage(error));
+	return data as CodexAccountsResponse;
+}
+
 export async function openCodexAccountLoginTerminal(): Promise<CodexAccountLoginTerminalStart> {
 	const { data, error } = await apiClient.POST("/api/v1/agents/codex/accounts/login-terminal");
 	if (error) throw new Error(apiErrorMessage(error));

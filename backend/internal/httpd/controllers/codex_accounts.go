@@ -23,6 +23,7 @@ import (
 type CodexAccountService interface {
 	CachedCodexAccounts(context.Context) (agentsvc.CodexAccounts, error)
 	EnsureCodexAccounts(context.Context, []string, bool) (agentsvc.CodexAccounts, error)
+	ConsumeCodexAccountResetCredit(context.Context, string, string) (agentsvc.CodexAccounts, error)
 	SubscribeCodexAccounts(context.Context) (<-chan agentsvc.CodexAccounts, error)
 	OpenCodexAccountLoginTerminal(context.Context) (agentsvc.CodexAccountLoginTerminalStart, error)
 	VerifyCodexAccountLogin(context.Context, string) (domain.CodexAccountLoginOperation, error)
@@ -40,6 +41,7 @@ type CodexAccountsController struct{ Svc CodexAccountService }
 func (c *CodexAccountsController) Register(r chi.Router) {
 	r.Get("/agents/codex/accounts", c.list)
 	r.Post("/agents/codex/accounts/ensure", c.ensure)
+	r.Post("/agents/codex/accounts/{accountId}/reset-credit/consume", c.consumeResetCredit)
 	r.Post("/agents/codex/accounts/login-terminal", c.openLoginTerminal)
 	r.Post("/agents/codex/accounts/login-operations/{operationId}/verify", c.verifyLogin)
 	r.Post("/agents/codex/accounts/login-operations/{operationId}/cancel", c.cancelLogin)
@@ -47,6 +49,28 @@ func (c *CodexAccountsController) Register(r chi.Router) {
 	r.Get("/agents/codex/account-switches/{switchId}", c.getSwitch)
 	r.Post("/agents/codex/account-switches/{switchId}/cancel", c.cancelSwitch)
 	r.Post("/agents/codex/account-switches/{switchId}/recover", c.recoverSwitch)
+}
+
+func (c *CodexAccountsController) consumeResetCredit(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/agents/codex/accounts/{accountId}/reset-credit/consume")
+		return
+	}
+	var request ConsumeCodexAccountResetCreditRequest
+	if err := decodeJSONStrict(r, &request); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if strings.TrimSpace(request.IdempotencyKey) == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "IDEMPOTENCY_KEY_REQUIRED", "Idempotency key is required", nil)
+		return
+	}
+	result, err := c.Svc.ConsumeCodexAccountResetCredit(r.Context(), strings.TrimSpace(chi.URLParam(r, "accountId")), request.IdempotencyKey)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, result)
 }
 
 func (c *CodexAccountsController) startSwitch(w http.ResponseWriter, r *http.Request) {

@@ -1,4 +1,4 @@
-import { ChevronDown, CircleAlert, CircleCheck, LoaderCircle, Plus, UserRound, X } from "lucide-react";
+import { ChevronDown, CircleAlert, CircleCheck, LoaderCircle, Plus, RotateCcw, UserRound, X } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -7,6 +7,7 @@ import {
 	cacheCodexAccount,
 	cacheCodexAccounts,
 	cancelCodexAccountLogin,
+	consumeCodexAccountResetCredit,
 	ensureCodexAccounts,
 	fetchCodexAccounts,
 	openCodexAccountLoginTerminal,
@@ -40,7 +41,9 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 	const [expandedAccount, setExpandedAccount] = useState<string | null>(null);
 	const [busy, setBusy] = useState<string | null>(null);
 	const [confirmAccount, setConfirmAccount] = useState<CodexAccount | null>(null);
+	const [confirmResetAccount, setConfirmResetAccount] = useState<CodexAccount | null>(null);
 	const switchRequestRef = useRef<{ accountId: string; revision: number; idempotencyKey: string } | null>(null);
+	const resetRequestRef = useRef<{ accountId: string; idempotencyKey: string } | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [announcement, setAnnouncement] = useState("");
 	const loginWorkflow = useUiStore((state) => state.codexAccountLoginTerminal);
@@ -51,7 +54,7 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 	const accountsError = accountsQuery.error instanceof Error ? accountsQuery.error.message : null;
 	const activeAccount = data?.accounts.find((account) => account.active);
 	const currentSwitch = data?.currentSwitch;
-	const globalSwitchSupported = data?.capabilities.globalSwitch.state === "supported";
+	const resetCreditSupported = data?.capabilities.resetCreditConsume.state === "supported";
 	const switchSourceAvailable = Boolean(data?.activeAccountId && activeAccount && !data.unmanagedGlobalAccount);
 	const switchActive = Boolean(currentSwitch && !["completed", "cancelled", "failed"].includes(currentSwitch.phase));
 
@@ -192,6 +195,28 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 		}
 	}, [currentSwitch, queryClient, t]);
 
+	const confirmReset = useCallback(async () => {
+		if (!confirmResetAccount || switchActive || loginWorkflow) return;
+		let request = resetRequestRef.current;
+		if (!request || request.accountId !== confirmResetAccount.id) {
+			request = { accountId: confirmResetAccount.id, idempotencyKey: crypto.randomUUID() };
+			resetRequestRef.current = request;
+		}
+		setBusy(`reset:${confirmResetAccount.id}`);
+		setError(null);
+		try {
+			const next = await consumeCodexAccountResetCredit(request.accountId, request.idempotencyKey);
+			cacheCodexAccounts(queryClient, next);
+			resetRequestRef.current = null;
+			setConfirmResetAccount(null);
+			setAnnouncement(t("settings.codexAccounts.resetSuccess", { label: confirmResetAccount.label }));
+		} catch (cause) {
+			setError(cause instanceof Error ? cause.message : t("settings.codexAccounts.resetFailed"));
+		} finally {
+			setBusy(null);
+		}
+	}, [confirmResetAccount, loginWorkflow, queryClient, switchActive, t]);
+
 	const summary = useMemo(() => {
 		if (accountsError) return accountsError;
 		if (!data) return t("settings.codexAccounts.loading");
@@ -216,7 +241,7 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 				action={(
 					<div className="flex items-center gap-2">
 						{switchActive ? <LoaderCircle className="size-5 animate-spin text-muted-foreground" aria-label={currentSwitch?.reason} /> : null}
-						<Button type="button" size="sm" title={accountsError ?? undefined} onClick={() => void beginLogin()} disabled={Boolean(loginWorkflow) || switchActive || busy === "login" || data?.capabilities.nativeLogin.state !== "supported"}>
+						<Button type="button" size="sm" title={accountsError ?? undefined} onClick={() => void beginLogin()} disabled={Boolean(loginWorkflow) || switchActive || Boolean(busy) || data?.capabilities.nativeLogin.state !== "supported"}>
 							<Plus aria-hidden="true" /> {t("settings.codexAccounts.add")}
 						</Button>
 					</div>
@@ -249,7 +274,7 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 				{accountsError ? <p className="px-4 py-3 text-xs text-error" role="alert">{accountsError}</p> : null}
 				<div className="divide-y divide-border">
 					{data?.accounts.map((account) => (
-						<CodexAccountRow key={account.id} account={account} expanded={expandedAccount === account.id} switchSourceAvailable={switchSourceAvailable} mutationDisabled={Boolean(loginWorkflow) || switchActive || !globalSwitchSupported} switchUnavailableReason={data.capabilities.globalSwitch.state === "supported" ? undefined : data.capabilities.globalSwitch.reason} busy={busy === account.id} onToggle={() => toggleAccount(account)} onSwitch={() => { switchRequestRef.current = null; setConfirmAccount(account); }} />
+						<CodexAccountRow key={account.id} account={account} expanded={expandedAccount === account.id} switchSourceAvailable={switchSourceAvailable} resetCreditSupported={resetCreditSupported} mutationDisabled={Boolean(loginWorkflow) || switchActive || Boolean(busy)} switchUnavailableReason={data.capabilities.globalSwitch.state === "supported" ? undefined : data.capabilities.globalSwitch.reason} busy={busy === account.id} resetBusy={busy === `reset:${account.id}`} onToggle={() => toggleAccount(account)} onSwitch={() => { switchRequestRef.current = null; setConfirmAccount(account); }} onUseReset={() => setConfirmResetAccount(account)} />
 					))}
 				</div>
 				{currentSwitch?.canRecover ? (
@@ -260,19 +285,23 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 				) : null}
 			</AgentProviderGroup>
 			<ConfirmDialog open={Boolean(confirmAccount && switchSourceAvailable)} title={t("settings.codexAccounts.switchTitle")} description={t("settings.codexAccounts.switchDescription", { label: confirmAccount?.label ?? "" })} confirmLabel={t("settings.codexAccounts.switchConfirm")} busy={Boolean(busy)} onConfirm={() => void confirmSwitch()} onOpenChange={(open) => { if (!open && !busy) { switchRequestRef.current = null; setConfirmAccount(null); } }} />
+			<ConfirmDialog open={Boolean(confirmResetAccount)} title={t("settings.codexAccounts.resetTitle")} description={t("settings.codexAccounts.resetDescription", { label: confirmResetAccount?.label ?? "" })} confirmLabel={t("settings.codexAccounts.useReset")} busy={Boolean(busy)} onConfirm={() => void confirmReset()} onOpenChange={(open) => { if (!open && !busy) setConfirmResetAccount(null); }} />
 		</SettingsSection>
 	);
 }
 
-function CodexAccountRow({ account, expanded, switchSourceAvailable, mutationDisabled, switchUnavailableReason, busy, onToggle, onSwitch }: {
+function CodexAccountRow({ account, expanded, switchSourceAvailable, resetCreditSupported, mutationDisabled, switchUnavailableReason, busy, resetBusy, onToggle, onSwitch, onUseReset }: {
 	account: CodexAccount;
 	expanded: boolean;
 	switchSourceAvailable: boolean;
+	resetCreditSupported: boolean;
 	mutationDisabled: boolean;
 	switchUnavailableReason?: string;
 	busy: boolean;
+	resetBusy: boolean;
 	onToggle: () => void;
 	onSwitch: () => void;
+	onUseReset: () => void;
 }) {
 	const { t } = useTranslation();
 	const authorized = account.authentication.state === "authorized" || account.authentication.state === "not_applicable";
@@ -295,32 +324,29 @@ function CodexAccountRow({ account, expanded, switchSourceAvailable, mutationDis
 					</div>
 					<ChevronDown className={`ml-auto mt-1 size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? "" : "-rotate-90"}`} aria-hidden="true" />
 				</button>
-				{switchSourceAvailable && !account.active && account.status === "valid" && authorized ? <Button type="button" size="sm" variant="outline" disabled={mutationDisabled || busy} title={switchUnavailableReason} onClick={onSwitch}>{t("settings.codexAccounts.switchAction")}</Button> : null}
+				{switchSourceAvailable && !account.active && account.status === "valid" && authorized ? <Button type="button" size="sm" variant="outline" disabled={mutationDisabled || busy || Boolean(switchUnavailableReason)} title={switchUnavailableReason} onClick={onSwitch}>{t("settings.codexAccounts.switchAction")}</Button> : null}
 			</div>
-			{expanded ? <CodexAccountDetails account={account} /> : null}
+			{expanded ? <CodexAccountDetails account={account} resetCreditSupported={resetCreditSupported} mutationDisabled={mutationDisabled} resetBusy={resetBusy} onUseReset={onUseReset} /> : null}
 		</div>
 	);
 }
 
-function CodexAccountDetails({ account }: { account: CodexAccount }) {
+function CodexAccountDetails({ account, resetCreditSupported, mutationDisabled, resetBusy, onUseReset }: { account: CodexAccount; resetCreditSupported: boolean; mutationDisabled: boolean; resetBusy: boolean; onUseReset: () => void }) {
 	const { t, i18n } = useTranslation();
 	const plan = formatPlanLabel(account.capacity.plan, t);
 	const hasOverall = Boolean(account.capacity.overall?.primary || account.capacity.overall?.secondary);
 	const additionalBuckets = account.capacity.additionalBuckets.filter((bucket) => bucket.primary || bucket.secondary);
 	const usage = account.usageSummary;
-	const hasUsage = Boolean(usage && (usage.latestDayTokens != null || usage.lifetimeTokens != null || usage.currentStreakDays != null));
-	const hasDetails = Boolean(plan || hasOverall || additionalBuckets.length > 0 || hasUsage);
+	const hasUsage = Boolean(usage && (usage.latestDayTokens != null || usage.lifetimeTokens != null || usage.peakDailyTokens != null || usage.longestRunningTurnSeconds != null || usage.currentStreakDays != null || usage.longestStreakDays != null));
+	const resetCredits = account.capacity.resetCredits;
+	const hasDetails = Boolean(plan || hasOverall || additionalBuckets.length > 0 || hasUsage || (resetCredits && resetCredits.availableCount > 0));
 	const capacityNotice = capacityNoticeFor(account, t, i18n.language);
 	return (
 		<div className="ml-9 mt-4 space-y-5 pb-1 text-xs">
 			{capacityNotice ? <CapacityNotice {...capacityNotice} /> : null}
-			{plan ? (
-				<section>
-					<h4 className="mb-2 font-medium text-foreground">{t("settings.codexAccounts.yourPlan")}</h4>
-					<div className="rounded-md border border-border/70 bg-muted/15 px-3.5 py-3">
-						<p className="text-sm font-medium text-foreground">{plan}</p>
-					</div>
-				</section>
+			{plan || hasUsage ? <AccountOverview plan={plan} usage={usage} locale={i18n.language} /> : null}
+			{resetCredits && resetCredits.availableCount > 0 ? (
+				<ResetCreditsRow summary={resetCredits} enabled={resetCreditSupported && !mutationDisabled} busy={resetBusy} locale={i18n.language} onUseReset={onUseReset} />
 			) : null}
 			{hasOverall && account.capacity.overall ? (
 				<CapacityBucketGroup bucket={account.capacity.overall} title={t("settings.codexAccounts.generalUsageLimits")} locale={i18n.language} />
@@ -335,7 +361,6 @@ function CodexAccountDetails({ account }: { account: CodexAccount }) {
 					locale={i18n.language}
 				/>
 			))}
-			{hasUsage && usage ? <AccountActivity usage={usage} locale={i18n.language} /> : null}
 			{!hasDetails && !capacityNotice ? <p className="text-muted-foreground">{t("settings.codexAccounts.usageDetailsUnavailable")}</p> : null}
 		</div>
 	);
@@ -344,6 +369,7 @@ function CodexAccountDetails({ account }: { account: CodexAccount }) {
 type CapacityBucketValue = NonNullable<CodexAccount["capacity"]["overall"]>;
 type CapacityWindowValue = NonNullable<CapacityBucketValue["primary"]>;
 type UsageSummaryValue = NonNullable<CodexAccount["usageSummary"]>;
+type ResetCreditsValue = NonNullable<CodexAccount["capacity"]["resetCredits"]>;
 
 function CapacityBucketGroup({ bucket, title, locale }: { bucket: CapacityBucketValue; title: string; locale: string }) {
 	const { t } = useTranslation();
@@ -395,34 +421,66 @@ function CapacityWindowRow({ window, label, reached, locale }: { window: Capacit
 	);
 }
 
-function AccountActivity({ usage, locale }: { usage: UsageSummaryValue; locale: string }) {
+function AccountOverview({ plan, usage, locale }: { plan: string | null; usage: UsageSummaryValue | null | undefined; locale: string }) {
 	const { t } = useTranslation();
-	const latestDay = usage.latestDayStartDate ? formatUsageDate(usage.latestDayStartDate, locale) : null;
+	const latestDay = usage?.latestDayStartDate ? formatUsageDate(usage.latestDayStartDate, locale) : null;
 	const metrics = [
-		usage.latestDayTokens == null ? null : {
+		plan ? { label: t("settings.codexAccounts.plan"), value: plan } : null,
+		usage?.latestDayTokens == null ? null : {
 			label: latestDay ? t("settings.codexAccounts.tokensOnDate", { date: latestDay }) : t("settings.codexAccounts.latestDayTokens"),
 			value: t("settings.codexAccounts.tokenCount", { value: formatCompactNumber(usage.latestDayTokens, locale) }),
 		},
-		usage.lifetimeTokens == null ? null : {
+		usage?.lifetimeTokens == null ? null : {
 			label: t("settings.codexAccounts.lifetimeTokens"),
 			value: t("settings.codexAccounts.tokenCount", { value: formatCompactNumber(usage.lifetimeTokens, locale) }),
 		},
-		usage.currentStreakDays == null ? null : {
+		usage?.peakDailyTokens == null ? null : {
+			label: t("settings.codexAccounts.peakTokens"),
+			value: t("settings.codexAccounts.tokenCount", { value: formatCompactNumber(usage.peakDailyTokens, locale) }),
+		},
+		usage?.longestRunningTurnSeconds == null ? null : {
+			label: t("settings.codexAccounts.longestChat"),
+			value: formatDuration(usage.longestRunningTurnSeconds, locale),
+		},
+		usage?.currentStreakDays == null ? null : {
 			label: t("settings.codexAccounts.currentStreak"),
 			value: t("settings.codexAccounts.dayCount", { count: usage.currentStreakDays }),
+		},
+		usage?.longestStreakDays == null ? null : {
+			label: t("settings.codexAccounts.longestStreak"),
+			value: t("settings.codexAccounts.dayCount", { count: usage.longestStreakDays }),
 		},
 	].filter((metric): metric is { label: string; value: string } => Boolean(metric));
 	if (metrics.length === 0) return null;
 	return (
-		<section>
-			<h4 className="mb-2 font-medium text-foreground">{t("settings.codexAccounts.activity")}</h4>
-			<div className="grid gap-px overflow-hidden rounded-md border border-border/70 bg-border/70 sm:grid-cols-3">
+		<section aria-label={t("settings.codexAccounts.accountOverview")}>
+			<div className="flex flex-wrap border-y border-border/70">
 				{metrics.map((metric) => (
-					<div key={metric.label} className="bg-[var(--color-bg-settings-row)] px-3.5 py-3">
+					<div key={metric.label} className="min-w-[8.5rem] flex-1 px-3 py-3 first:pl-0 last:pr-0">
 						<p className="text-sm font-semibold tabular-nums text-foreground">{metric.value}</p>
-						<p className="mt-0.5 text-muted-foreground">{metric.label}</p>
+						<p className="mt-0.5 whitespace-nowrap text-muted-foreground">{metric.label}</p>
 					</div>
 				))}
+			</div>
+		</section>
+	);
+}
+
+function ResetCreditsRow({ summary, enabled, busy, locale, onUseReset }: { summary: ResetCreditsValue; enabled: boolean; busy: boolean; locale: string; onUseReset: () => void }) {
+	const { t } = useTranslation();
+	const expiry = formatResetTime(summary.nearestExpiresAt, locale);
+	return (
+		<section aria-labelledby="codex-reset-credits-heading">
+			<h4 id="codex-reset-credits-heading" className="mb-2 font-medium text-foreground">{t("settings.codexAccounts.usageLimitResets")}</h4>
+			<div className="flex flex-wrap items-center justify-between gap-3 border-y border-border/70 py-3">
+				<div>
+					<p className="font-medium text-foreground">{t("settings.codexAccounts.resetCount", { count: summary.availableCount })}</p>
+					{expiry ? <p className="mt-0.5 text-muted-foreground" title={expiry.full}>{t("settings.codexAccounts.resetExpires", { value: expiry.visible })}</p> : null}
+				</div>
+				<Button type="button" size="sm" variant="outline" disabled={!enabled || busy} onClick={onUseReset}>
+					{busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <RotateCcw aria-hidden="true" />}
+					{t("settings.codexAccounts.useReset")}
+				</Button>
 			</div>
 		</section>
 	);
@@ -512,6 +570,17 @@ function formatUsageDate(value: string, locale: string): string | null {
 
 function formatCompactNumber(value: number, locale: string): string {
 	return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function formatDuration(totalSeconds: number, locale: string): string {
+	const seconds = Math.max(0, Math.round(totalSeconds));
+	const hours = Math.floor(seconds / 3600);
+	const minutes = Math.floor((seconds % 3600) / 60);
+	const remainder = seconds % 60;
+	const number = new Intl.NumberFormat(locale);
+	if (hours > 0) return `${number.format(hours)}h ${number.format(minutes)}m`;
+	if (minutes > 0) return `${number.format(minutes)}m`;
+	return `${number.format(remainder)}s`;
 }
 
 function CodexAccountLoginTerminalPanel({ workflow, onCheckAgain, onClose, onRetry, onTerminalState }: {

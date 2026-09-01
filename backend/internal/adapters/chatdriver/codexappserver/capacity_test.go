@@ -14,7 +14,8 @@ func TestCapacityNormalizationIncludesBucketsAndRejectsMalformedWindows(t *testi
 	var envelope capacityReadEnvelope
 	err := json.Unmarshal([]byte(`{
 		"rateLimits":{"limitId":"codex","planType":"pro","primary":{"usedPercent":81,"windowDurationMins":300,"resetsAt":4102444800},"secondary":{"usedPercent":101}},
-		"rateLimitsByLimitId":{"spark":{"limitId":"spark","limitName":"Spark","primary":{"usedPercent":25}},"alpha":{"limitId":"alpha","primary":{"usedPercent":10}}}
+		"rateLimitsByLimitId":{"spark":{"limitId":"spark","limitName":"Spark","primary":{"usedPercent":25}},"alpha":{"limitId":"alpha","primary":{"usedPercent":10}}},
+		"rateLimitResetCredits":{"availableCount":2,"credits":[{"id":"opaque","grantedAt":1,"expiresAt":4102444800,"resetType":"codexRateLimits","status":"available"}]}
 	}`), &envelope)
 	if err != nil {
 		t.Fatal(err)
@@ -28,6 +29,9 @@ func TestCapacityNormalizationIncludesBucketsAndRejectsMalformedWindows(t *testi
 	}
 	if len(observed.AdditionalBuckets) != 2 || observed.AdditionalBuckets[0].LimitID != "alpha" || observed.AdditionalBuckets[1].LimitID != "spark" || observed.AdditionalBuckets[1].Reached != domain.CodexCapacityNotReached {
 		t.Fatalf("additional buckets = %#v", observed.AdditionalBuckets)
+	}
+	if observed.ResetCredits == nil || observed.ResetCredits.AvailableCount != 2 || observed.ResetCredits.NearestExpiresAt == nil {
+		t.Fatalf("reset credits = %#v", observed.ResetCredits)
 	}
 }
 
@@ -55,7 +59,10 @@ func TestSparseCapacityNormalizationKeepsUnknownReachedState(t *testing.T) {
 
 func TestUsageNormalizationNamesUnitsAndSelectsLatestValidDay(t *testing.T) {
 	lifetime := int64(54571452296)
+	peak := int64(2000000000)
+	longestTurn := int64(26340)
 	streak := int64(2)
+	longestStreak := int64(99)
 	observedAt := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.FixedZone("IST", 5*60*60+30*60))
 	observed := usageObservationFromResponse(codexproto.GetAccountTokenUsageResponse{
 		DailyUsageBuckets: []codexproto.AccountTokenUsageDailyBucket{
@@ -63,13 +70,16 @@ func TestUsageNormalizationNamesUnitsAndSelectsLatestValidDay(t *testing.T) {
 			{StartDate: "not-a-date", Tokens: 99},
 			{StartDate: "2026-08-31", Tokens: 34904480},
 		},
-		Summary: codexproto.AccountTokenUsageSummary{LifetimeTokens: &lifetime, CurrentStreakDays: &streak},
+		Summary: codexproto.AccountTokenUsageSummary{LifetimeTokens: &lifetime, PeakDailyTokens: &peak, LongestRunningTurnSec: &longestTurn, CurrentStreakDays: &streak, LongestStreakDays: &longestStreak},
 	}, observedAt)
 	if observed.LatestDayTokens == nil || *observed.LatestDayTokens != 34904480 || observed.LatestDayStartDate == nil || *observed.LatestDayStartDate != "2026-08-31" {
 		t.Fatalf("latest day = %#v", observed)
 	}
 	if observed.LifetimeTokens == nil || *observed.LifetimeTokens != lifetime || observed.CurrentStreakDays == nil || *observed.CurrentStreakDays != streak {
 		t.Fatalf("summary = %#v", observed)
+	}
+	if observed.PeakDailyTokens == nil || *observed.PeakDailyTokens != peak || observed.LongestRunningTurnSeconds == nil || *observed.LongestRunningTurnSeconds != longestTurn || observed.LongestStreakDays == nil || *observed.LongestStreakDays != longestStreak {
+		t.Fatalf("extended summary = %#v", observed)
 	}
 	if observed.ObservedAt.Location() != time.UTC {
 		t.Fatalf("observed at = %v, want UTC", observed.ObservedAt)

@@ -157,6 +157,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/codex/accounts/{accountId}/reset-credit/consume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Consume one provider-reported Codex usage-limit reset credit */
+        post: operations["consumeCodexAccountResetCredit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/codex/accounts/ensure": {
         parameters: {
             query?: never;
@@ -2243,6 +2260,7 @@ export interface components {
             capacityRead: components["schemas"]["CodexCapabilityObservation"];
             globalSwitch: components["schemas"]["CodexCapabilityObservation"];
             nativeLogin: components["schemas"]["CodexCapabilityObservation"];
+            resetCreditConsume: components["schemas"]["CodexCapabilityObservation"];
             threadResume: components["schemas"]["CodexCapabilityObservation"];
             usageRead: components["schemas"]["CodexCapabilityObservation"];
         };
@@ -2320,8 +2338,11 @@ export interface components {
             latestDayStartDate?: null | string;
             latestDayTokens?: null | number;
             lifetimeTokens?: null | number;
+            longestRunningTurnSeconds?: null | number;
+            longestStreakDays?: null | number;
             /** Format: date-time */
             observedAt: string;
+            peakDailyTokens?: null | number;
         };
         CodexAccountsResponse: {
             /** Format: int64 */
@@ -2361,6 +2382,7 @@ export interface components {
             reason: string;
             reasonCode: string;
             remainingPercent?: null | number;
+            resetCredits?: components["schemas"]["CodexResetCreditsSummary"];
             /** Format: date-time */
             resetsAt?: null | string;
             /** @enum {string} */
@@ -2373,6 +2395,12 @@ export interface components {
             /** Format: double */
             usedPercent: number;
             windowDurationMinutes?: null | number;
+        };
+        CodexResetCreditsSummary: {
+            /** Format: int64 */
+            availableCount: number;
+            /** Format: date-time */
+            nearestExpiresAt?: null | string;
         };
         CodexUnmanagedGlobalAccount: {
             accountEmail?: null | string;
@@ -2398,6 +2426,9 @@ export interface components {
              * @description Deprecated compatibility alias for processedTokens.
              */
             totalTokens: number;
+        };
+        ConsumeCodexAccountResetCreditRequest: {
+            idempotencyKey: string;
         };
         ContainerReapConfig: {
             disabled?: boolean;
@@ -4203,6 +4234,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CodexAccountsResponse"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    consumeCodexAccountResetCredit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description AO Codex account identifier. */
+                accountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsumeCodexAccountResetCreditRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexAccountsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Implemented */

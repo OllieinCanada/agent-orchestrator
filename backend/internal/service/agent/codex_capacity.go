@@ -295,6 +295,7 @@ func capacitySnapshotFromObservation(observation ports.CodexCapacityObservation,
 		State: domain.CodexCapacityUnknown, Freshness: domain.AgentReadinessFresh,
 		Plan: observation.Plan, Overall: observation.Overall,
 		AdditionalBuckets: append([]domain.CodexCapacityBucket(nil), observation.AdditionalBuckets...),
+		ResetCredits:      observation.ResetCredits,
 		ReasonCode:        domain.CodexCapacityReasonCheckInconclusive, Reason: "Codex did not report a trustworthy overall capacity window.",
 	}
 	if snapshot.AdditionalBuckets == nil {
@@ -363,7 +364,7 @@ func mergeCapacityObservation(current domain.CodexCapacitySnapshot, observation 
 	if !observation.Partial || current.CheckedAt == nil {
 		return capacitySnapshotFromObservation(observation, receivedAt, receivedAt)
 	}
-	merged := ports.CodexCapacityObservation{Plan: current.Plan, Overall: current.Overall, AdditionalBuckets: current.AdditionalBuckets, ObservedAt: receivedAt, Partial: true}
+	merged := ports.CodexCapacityObservation{Plan: current.Plan, Overall: current.Overall, AdditionalBuckets: current.AdditionalBuckets, ResetCredits: current.ResetCredits, ObservedAt: receivedAt, Partial: true}
 	if observation.Plan != nil {
 		merged.Plan = observation.Plan
 	}
@@ -391,8 +392,31 @@ func mergeCapacityObservation(current domain.CodexCapacitySnapshot, observation 
 			merged.Overall = &mergedOverall
 		}
 	}
+	if observation.ResetCredits != nil {
+		merged.ResetCredits = observation.ResetCredits
+	}
 	result := capacitySnapshotFromObservation(merged, receivedAt, receivedAt)
 	return result
+}
+
+func (c *codexCapacityCoordinator) acceptDirect(accountID string, observation ports.CodexCapacityObservation, attemptedAt time.Time) domain.CodexCapacitySnapshot {
+	c.finishSuccess(accountID, observation, attemptedAt, nil, "reset_credit")
+	return c.snapshot(accountID)
+}
+
+func (c *codexCapacityCoordinator) invalidateAfterReset(accountID string) {
+	c.mu.Lock()
+	state := c.ensureStateLocked(accountID)
+	state.snapshot.ResetCredits = nil
+	state.snapshot.Freshness = domain.AgentReadinessStale
+	state.snapshot.ReasonCode = domain.CodexCapacityReasonInvalidated
+	state.snapshot.Reason = "A Codex usage-limit reset was applied; capacity should be checked again."
+	state.invalidated = true
+	state.nextRetryAt = time.Time{}
+	state.generation++
+	snapshot := state.snapshot
+	c.mu.Unlock()
+	c.publish(accountID, &snapshot)
 }
 
 func (c *codexCapacityCoordinator) preserveFailure(accountID, code, reason string) domain.CodexCapacitySnapshot {

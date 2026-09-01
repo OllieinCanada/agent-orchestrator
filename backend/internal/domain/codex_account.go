@@ -54,13 +54,14 @@ type CodexCapabilityObservation struct {
 
 // CodexAccountCapabilities reports the account-management protocol surface.
 type CodexAccountCapabilities struct {
-	AccountRead       CodexCapabilityObservation `json:"accountRead"`
-	NativeLogin       CodexCapabilityObservation `json:"nativeLogin"`
-	CapacityRead      CodexCapabilityObservation `json:"capacityRead"`
-	UsageRead         CodexCapabilityObservation `json:"usageRead"`
-	ThreadResume      CodexCapabilityObservation `json:"threadResume"`
-	AccountManagement CodexCapabilityObservation `json:"accountManagement"`
-	GlobalSwitch      CodexCapabilityObservation `json:"globalSwitch"`
+	AccountRead        CodexCapabilityObservation `json:"accountRead"`
+	NativeLogin        CodexCapabilityObservation `json:"nativeLogin"`
+	CapacityRead       CodexCapabilityObservation `json:"capacityRead"`
+	UsageRead          CodexCapabilityObservation `json:"usageRead"`
+	ResetCreditConsume CodexCapabilityObservation `json:"resetCreditConsume"`
+	ThreadResume       CodexCapabilityObservation `json:"threadResume"`
+	AccountManagement  CodexCapabilityObservation `json:"accountManagement"`
+	GlobalSwitch       CodexCapabilityObservation `json:"globalSwitch"`
 }
 
 // CodexAccountSnapshot is the display-safe cached state for one AO account.
@@ -84,12 +85,27 @@ type CodexAccountSnapshot struct {
 // aggregates. Field names carry their units so renderers never have to infer
 // what the provider values represent.
 type CodexAccountUsageSummary struct {
-	LatestDayTokens    *int64    `json:"latestDayTokens,omitempty"`
-	LatestDayStartDate *string   `json:"latestDayStartDate,omitempty"`
-	LifetimeTokens     *int64    `json:"lifetimeTokens,omitempty"`
-	CurrentStreakDays  *int64    `json:"currentStreakDays,omitempty"`
-	ObservedAt         time.Time `json:"observedAt"`
+	LatestDayTokens           *int64    `json:"latestDayTokens,omitempty"`
+	LatestDayStartDate        *string   `json:"latestDayStartDate,omitempty"`
+	LifetimeTokens            *int64    `json:"lifetimeTokens,omitempty"`
+	PeakDailyTokens           *int64    `json:"peakDailyTokens,omitempty"`
+	LongestRunningTurnSeconds *int64    `json:"longestRunningTurnSeconds,omitempty"`
+	CurrentStreakDays         *int64    `json:"currentStreakDays,omitempty"`
+	LongestStreakDays         *int64    `json:"longestStreakDays,omitempty"`
+	ObservedAt                time.Time `json:"observedAt"`
 }
+
+// CodexResetCreditOutcome is the provider's idempotent result for one reset
+// attempt. It is kept internal to the daemon boundary; public callers receive
+// the refreshed account snapshot or a typed API error.
+type CodexResetCreditOutcome string
+
+const (
+	CodexResetCreditReset           CodexResetCreditOutcome = "reset"
+	CodexResetCreditAlreadyRedeemed CodexResetCreditOutcome = "already_redeemed"
+	CodexResetCreditNothingToReset  CodexResetCreditOutcome = "nothing_to_reset"
+	CodexResetCreditNoCredit        CodexResetCreditOutcome = "no_credit"
+)
 
 const (
 	// CodexAccountReasonValid identifies a usable account slot.

@@ -25,6 +25,7 @@ const (
 	codexAccountLaunchTTL     = 30 * time.Second
 	codexAccountAuthTimeout   = 10 * time.Second
 	codexAccountUsageTTL      = 5 * time.Minute
+	codexResetCreditTimeout   = 15 * time.Second
 	codexAccountLoginLifetime = 15 * time.Minute
 	codexAccountProcessLimit  = 2
 )
@@ -139,7 +140,7 @@ func newCodexAccountManager(ctx context.Context, accountRoot, pendingRoot, switc
 
 func unavailableCodexCapabilities() domain.CodexAccountCapabilities {
 	unknown := domain.CodexCapabilityObservation{State: domain.CodexCapabilityUnknown, ReasonCode: domain.CodexCapabilityReasonUnknown, Reason: "Codex capability detection has not completed."}
-	return domain.CodexAccountCapabilities{AccountRead: unknown, NativeLogin: unknown, CapacityRead: unknown, UsageRead: unknown, ThreadResume: unknown, AccountManagement: unknown, GlobalSwitch: unknown}
+	return domain.CodexAccountCapabilities{AccountRead: unknown, NativeLogin: unknown, CapacityRead: unknown, UsageRead: unknown, ResetCreditConsume: unknown, ThreadResume: unknown, AccountManagement: unknown, GlobalSwitch: unknown}
 }
 
 func (m *codexAccountManager) detectCapabilities(ctx context.Context) domain.CodexAccountCapabilities {
@@ -445,7 +446,9 @@ func (m *codexAccountManager) runUsage(record codexAccountRecord, state *account
 	}
 	value := &domain.CodexAccountUsageSummary{
 		LatestDayTokens: usage.LatestDayTokens, LatestDayStartDate: usage.LatestDayStartDate,
-		LifetimeTokens: usage.LifetimeTokens, CurrentStreakDays: usage.CurrentStreakDays,
+		LifetimeTokens: usage.LifetimeTokens, PeakDailyTokens: usage.PeakDailyTokens,
+		LongestRunningTurnSeconds: usage.LongestRunningTurnSeconds,
+		CurrentStreakDays:         usage.CurrentStreakDays, LongestStreakDays: usage.LongestStreakDays,
 		ObservedAt: usage.ObservedAt,
 	}
 	m.mu.Lock()
@@ -453,6 +456,88 @@ func (m *codexAccountManager) runUsage(record codexAccountRecord, state *account
 	state.checkedAt = m.now()
 	m.mu.Unlock()
 	m.publish()
+}
+
+func (m *codexAccountManager) consumeResetCredit(ctx context.Context, accountID, idempotencyKey string) error {
+	accountID, idempotencyKey = strings.TrimSpace(accountID), strings.TrimSpace(idempotencyKey)
+	if idempotencyKey == "" {
+		return apierr.Invalid("IDEMPOTENCY_KEY_REQUIRED", "Idempotency key is required", nil)
+	}
+	if err := m.catalog.refresh(); err != nil {
+		return apierr.Unavailable("CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE", "Codex account discovery is unavailable")
+	}
+	record, ok := m.catalog.record(accountID)
+	if !ok {
+		return apierr.NotFound("CODEX_ACCOUNT_NOT_FOUND", "Codex account not found")
+	}
+	if record.Snapshot.Status != domain.CodexAccountStatusValid {
+		return apierr.Conflict("CODEX_ACCOUNT_UNAVAILABLE", "This Codex account is unavailable", nil)
+	}
+	m.mu.Lock()
+	loginActive := m.login != nil && !terminalLoginStatus(m.login.snapshot.Status)
+	m.mu.Unlock()
+	if loginActive {
+		return apierr.Conflict("CODEX_ACCOUNT_LOGIN_IN_PROGRESS", "Finish or close the Codex account login before using a reset", nil)
+	}
+	if m.factory == nil {
+		return apierr.Unavailable("CODEX_RESET_CREDIT_UNAVAILABLE", "Codex usage-limit reset is unavailable")
+	}
+	capabilities := m.detectCapabilities(ctx)
+	switch capabilities.ResetCreditConsume.State {
+	case domain.CodexCapabilityUnsupported:
+		return apierr.NotImplemented("CODEX_RESET_CREDIT_UNSUPPORTED", "This Codex version does not support usage-limit resets")
+	case domain.CodexCapabilityUnknown, "":
+		return apierr.Unavailable("CODEX_RESET_CREDIT_UNAVAILABLE", "Codex usage-limit reset support could not be confirmed")
+	}
+	select {
+	case m.processes <- struct{}{}:
+		defer func() { <-m.processes }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	operationCtx, cancel := context.WithTimeout(ctx, codexResetCreditTimeout)
+	defer cancel()
+	client, err := m.factory.Open(operationCtx, m.accountContext(record))
+	if err != nil {
+		return apierr.Unavailable("CODEX_RESET_CREDIT_UNAVAILABLE", "Codex usage-limit reset could not be started")
+	}
+	defer func() { _ = client.Close() }()
+	auth, err := client.Read(operationCtx, true)
+	if err != nil || auth.Authentication != domain.AgentAuthenticationAuthorized || auth.Method != domain.CodexAuthMethodChatGPT {
+		return apierr.Conflict("CODEX_ACCOUNT_AUTH_UNVERIFIED", "Confirm this Codex account before using a reset", nil)
+	}
+	attemptedAt := m.now()
+	before, err := client.ReadCapacity(operationCtx)
+	if err != nil {
+		return apierr.Unavailable("CODEX_RESET_CREDIT_UNAVAILABLE", "Available Codex usage-limit resets could not be confirmed")
+	}
+	m.capacity.acceptDirect(accountID, before, attemptedAt)
+	if before.ResetCredits == nil || before.ResetCredits.AvailableCount <= 0 {
+		return apierr.Conflict("CODEX_RESET_CREDIT_UNAVAILABLE", "No Codex usage-limit reset is currently available", nil)
+	}
+	outcome, err := client.ConsumeResetCredit(operationCtx, idempotencyKey)
+	if err != nil {
+		m.capacity.invalidateAfterReset(accountID)
+		return apierr.Unavailable("CODEX_RESET_CREDIT_UNAVAILABLE", "Codex could not confirm the usage-limit reset")
+	}
+	switch outcome {
+	case domain.CodexResetCreditNoCredit:
+		m.capacity.invalidateAfterReset(accountID)
+		return apierr.Conflict("CODEX_RESET_CREDIT_UNAVAILABLE", "No Codex usage-limit reset is currently available", nil)
+	case domain.CodexResetCreditNothingToReset:
+		return apierr.Conflict("CODEX_USAGE_LIMIT_RESET_NOT_APPLICABLE", "No current Codex usage limit is eligible for reset", nil)
+	case domain.CodexResetCreditReset, domain.CodexResetCreditAlreadyRedeemed:
+		m.capacity.invalidateAfterReset(accountID)
+	default:
+		m.capacity.invalidateAfterReset(accountID)
+		return apierr.Unavailable("CODEX_RESET_CREDIT_UNAVAILABLE", "Codex returned an unknown usage-limit reset result")
+	}
+	after, readErr := client.ReadCapacity(operationCtx)
+	if readErr == nil {
+		m.capacity.acceptDirect(accountID, after, attemptedAt)
+	}
+	m.publish()
+	return nil
 }
 
 func (m *codexAccountManager) openLoginTerminal(ctx context.Context) (CodexAccountLoginTerminalStart, error) {
@@ -1384,6 +1469,25 @@ func (s *Service) EnsureCodexAccounts(ctx context.Context, ids []string, include
 		}
 	}
 	return result, err
+}
+
+// ConsumeCodexAccountResetCredit redeems one provider-reported usage-limit
+// reset and returns the refreshed cached account view. The provider chooses the
+// credit; opaque credit identifiers never cross the daemon boundary.
+func (s *Service) ConsumeCodexAccountResetCredit(ctx context.Context, accountID, idempotencyKey string) (CodexAccounts, error) {
+	if s.codexAccounts == nil {
+		return CodexAccounts{}, apierr.Unavailable("CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE", "Codex account management is unavailable")
+	}
+	if s.codexSwitches != nil && s.codexSwitches.CodexAccountSwitchInProgress() {
+		return CodexAccounts{}, apierr.Conflict("CODEX_ACCOUNT_SWITCH_IN_PROGRESS", "Wait for the Codex account switch to finish before using a reset", nil)
+	}
+	if err := s.WaitCodexAccountBootstrap(ctx); err != nil {
+		return CodexAccounts{}, err
+	}
+	if err := s.codexAccounts.consumeResetCredit(ctx, accountID, idempotencyKey); err != nil {
+		return CodexAccounts{}, err
+	}
+	return s.CachedCodexAccounts(ctx)
 }
 
 // SubscribeCodexAccounts returns cached state followed by latest-wins updates.

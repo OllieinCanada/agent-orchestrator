@@ -43,22 +43,32 @@ type CodexCapacityBucket struct {
 	Reached     CodexCapacityReachedState `json:"reached" enum:"not_reached,reached,unknown"`
 }
 
+// CodexResetCreditsSummary is the safe subset of provider-reported usage-limit
+// reset credits. Opaque credit identifiers and raw provider detail rows remain
+// private to the Codex app-server process.
+type CodexResetCreditsSummary struct {
+	AvailableCount   int64      `json:"availableCount" minimum:"0"`
+	NearestExpiresAt *time.Time `json:"nearestExpiresAt,omitempty"`
+}
+
 // CodexCapacitySnapshot is the daemon-memory capacity observation exposed on a
-// account. Reset-credit and raw provider payloads are deliberately absent.
+// account. Raw provider payloads and opaque reset-credit identifiers are
+// deliberately absent.
 type CodexCapacitySnapshot struct {
-	State             CodexCapacityState      `json:"state" enum:"available,near_limit,exhausted,unknown,unsupported"`
-	Freshness         AgentReadinessFreshness `json:"freshness" enum:"fresh,stale,checking"`
-	Plan              *string                 `json:"plan,omitempty"`
-	UsedPercent       *float64                `json:"usedPercent,omitempty" minimum:"0" maximum:"100"`
-	RemainingPercent  *float64                `json:"remainingPercent,omitempty" minimum:"0" maximum:"100"`
-	ResetsAt          *time.Time              `json:"resetsAt,omitempty"`
-	ObservedAt        *time.Time              `json:"observedAt,omitempty"`
-	CheckedAt         *time.Time              `json:"checkedAt,omitempty"`
-	AttemptedAt       *time.Time              `json:"attemptedAt,omitempty"`
-	ReasonCode        string                  `json:"reasonCode"`
-	Reason            string                  `json:"reason"`
-	Overall           *CodexCapacityBucket    `json:"overall,omitempty"`
-	AdditionalBuckets []CodexCapacityBucket   `json:"additionalBuckets"`
+	State             CodexCapacityState        `json:"state" enum:"available,near_limit,exhausted,unknown,unsupported"`
+	Freshness         AgentReadinessFreshness   `json:"freshness" enum:"fresh,stale,checking"`
+	Plan              *string                   `json:"plan,omitempty"`
+	UsedPercent       *float64                  `json:"usedPercent,omitempty" minimum:"0" maximum:"100"`
+	RemainingPercent  *float64                  `json:"remainingPercent,omitempty" minimum:"0" maximum:"100"`
+	ResetsAt          *time.Time                `json:"resetsAt,omitempty"`
+	ObservedAt        *time.Time                `json:"observedAt,omitempty"`
+	CheckedAt         *time.Time                `json:"checkedAt,omitempty"`
+	AttemptedAt       *time.Time                `json:"attemptedAt,omitempty"`
+	ReasonCode        string                    `json:"reasonCode"`
+	Reason            string                    `json:"reason"`
+	Overall           *CodexCapacityBucket      `json:"overall,omitempty"`
+	AdditionalBuckets []CodexCapacityBucket     `json:"additionalBuckets"`
+	ResetCredits      *CodexResetCreditsSummary `json:"resetCredits,omitempty"`
 }
 
 // CodexCapacitySummary is the compact session-list projection of the current

@@ -222,6 +222,7 @@ func inspectCodexSchemaDirectory(dir string) domain.CodexAccountCapabilities {
 		codexproto.MethodAccountRead,
 		codexproto.MethodAccountRateLimitsRead,
 		codexproto.MethodAccountUsageRead,
+		codexproto.MethodAccountRateLimitResetCreditConsume,
 		codexproto.MethodThreadResume,
 		codexproto.MethodAccountUpdated,
 	}
@@ -266,13 +267,14 @@ func inspectCodexSchemaDirectory(dir string) domain.CodexAccountCapabilities {
 	threadResume := declared[codexproto.MethodThreadResume]
 	unknown := domain.CodexCapabilityObservation{State: domain.CodexCapabilityUnknown, ReasonCode: domain.CodexCapabilityReasonUnknown, Reason: "This capability requires a bounded Codex CLI probe."}
 	return domain.CodexAccountCapabilities{
-		AccountRead:       codexCapability(accountRead, "Structured Codex account discovery is available.", "Structured Codex account discovery is not supported by this Codex version."),
-		NativeLogin:       unknown,
-		CapacityRead:      codexCapability(declared[codexproto.MethodAccountRateLimitsRead], "Codex subscription capacity is available.", "Codex subscription capacity is not supported by this Codex version."),
-		UsageRead:         codexCapability(declared[codexproto.MethodAccountUsageRead], "Codex account usage is available.", "Codex account usage is not supported by this Codex version."),
-		ThreadResume:      codexCapability(threadResume, "Exact Codex thread resume is available.", "Exact Codex thread resume is not supported by this Codex version."),
-		AccountManagement: unknown,
-		GlobalSwitch:      unknown,
+		AccountRead:        codexCapability(accountRead, "Structured Codex account discovery is available.", "Structured Codex account discovery is not supported by this Codex version."),
+		NativeLogin:        unknown,
+		CapacityRead:       codexCapability(declared[codexproto.MethodAccountRateLimitsRead], "Codex subscription capacity is available.", "Codex subscription capacity is not supported by this Codex version."),
+		UsageRead:          codexCapability(declared[codexproto.MethodAccountUsageRead], "Codex account usage is available.", "Codex account usage is not supported by this Codex version."),
+		ResetCreditConsume: codexCapability(declared[codexproto.MethodAccountRateLimitResetCreditConsume], "Codex usage-limit reset credits can be redeemed.", "Codex usage-limit reset credits are not supported by this Codex version."),
+		ThreadResume:       codexCapability(threadResume, "Exact Codex thread resume is available.", "Exact Codex thread resume is not supported by this Codex version."),
+		AccountManagement:  unknown,
+		GlobalSwitch:       unknown,
 	}
 }
 
@@ -285,7 +287,7 @@ func codexCapability(supported bool, yes, no string) domain.CodexCapabilityObser
 
 func unknownCodexCapabilities(reason string) domain.CodexAccountCapabilities {
 	unknown := domain.CodexCapabilityObservation{State: domain.CodexCapabilityUnknown, ReasonCode: domain.CodexCapabilityReasonUnknown, Reason: reason}
-	return domain.CodexAccountCapabilities{AccountRead: unknown, NativeLogin: unknown, CapacityRead: unknown, UsageRead: unknown, ThreadResume: unknown, AccountManagement: unknown, GlobalSwitch: unknown}
+	return domain.CodexAccountCapabilities{AccountRead: unknown, NativeLogin: unknown, CapacityRead: unknown, UsageRead: unknown, ResetCreditConsume: unknown, ThreadResume: unknown, AccountManagement: unknown, GlobalSwitch: unknown}
 }
 
 type accountClient struct {

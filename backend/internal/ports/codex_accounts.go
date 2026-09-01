@@ -27,6 +27,7 @@ type CodexCapacityObservation struct {
 	Plan              *string
 	Overall           *domain.CodexCapacityBucket
 	AdditionalBuckets []domain.CodexCapacityBucket
+	ResetCredits      *domain.CodexResetCreditsSummary
 	ObservedAt        time.Time
 	Partial           bool
 }
@@ -34,11 +35,14 @@ type CodexCapacityObservation struct {
 // CodexUsageObservation is the deliberately small, display-safe subset of
 // account/usage/read retained in daemon memory.
 type CodexUsageObservation struct {
-	LatestDayTokens    *int64
-	LatestDayStartDate *string
-	LifetimeTokens     *int64
-	CurrentStreakDays  *int64
-	ObservedAt         time.Time
+	LatestDayTokens           *int64
+	LatestDayStartDate        *string
+	LifetimeTokens            *int64
+	PeakDailyTokens           *int64
+	LongestRunningTurnSeconds *int64
+	CurrentStreakDays         *int64
+	LongestStreakDays         *int64
+	ObservedAt                time.Time
 }
 
 // CodexAccountEventKind identifies a display-safe app-server account notification.
@@ -66,6 +70,7 @@ type CodexAccountClient interface {
 	Read(ctx context.Context, refreshToken bool) (CodexAccountObservation, error)
 	ReadCapacity(ctx context.Context) (CodexCapacityObservation, error)
 	ReadUsage(ctx context.Context) (CodexUsageObservation, error)
+	ConsumeResetCredit(ctx context.Context, idempotencyKey string) (domain.CodexResetCreditOutcome, error)
 	Events() <-chan CodexAccountEvent
 	Close() error
 }

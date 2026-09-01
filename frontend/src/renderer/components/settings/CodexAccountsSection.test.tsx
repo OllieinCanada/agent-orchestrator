@@ -34,7 +34,7 @@ const accountResponse = {
 	accounts: [activeAccount, inactiveAccount],
 	capabilities: {
 		accountRead: capability(), nativeLogin: capability(), capacityRead: capability(), usageRead: capability("unsupported"),
-		threadResume: capability(), accountManagement: capability(), globalSwitch: capability(),
+		resetCreditConsume: capability(), threadResume: capability(), accountManagement: capability(), globalSwitch: capability(),
 	},
 };
 const pendingLogin = {
@@ -117,7 +117,10 @@ it("presents plan, general and model usage limits with remaining-capacity meters
 			latestDayTokens: 34904480,
 			latestDayStartDate: "2026-08-31",
 			lifetimeTokens: 54571452296,
+			peakDailyTokens: 2000000000,
+			longestRunningTurnSeconds: 26340,
 			currentStreakDays: 2,
+			longestStreakDays: 99,
 			observedAt: "2026-08-31T10:00:00Z",
 		},
 	};
@@ -130,7 +133,8 @@ it("presents plan, general and model usage limits with remaining-capacity meters
 	await screen.findAllByText(/81% remaining/);
 	fireEvent.click(container.querySelector(`[data-account-id="${activeAccount.id}"] button`) as HTMLButtonElement);
 
-	expect(await screen.findByText("Your plan")).toBeInTheDocument();
+	expect(screen.queryByText("Your plan")).not.toBeInTheDocument();
+	expect(await screen.findByRole("region", { name: "Account overview" })).toBeInTheDocument();
 	expect(screen.getByText("Pro plan")).toBeInTheDocument();
 	expect(screen.getByText("General usage limits")).toBeInTheDocument();
 	expect(screen.getAllByText("Weekly usage limit")).toHaveLength(2);
@@ -140,9 +144,48 @@ it("presents plan, general and model usage limits with remaining-capacity meters
 	expect(weeklyMeter).toHaveAttribute("aria-valuenow", "81");
 	expect(screen.getByText("34.9M tokens")).toBeInTheDocument();
 	expect(screen.getByText("54.6B tokens")).toBeInTheDocument();
+	expect(screen.getByText("2B tokens")).toBeInTheDocument();
+	expect(screen.getByText("7h 19m")).toBeInTheDocument();
 	expect(screen.getByText("2 days")).toBeInTheDocument();
+	expect(screen.getByText("99 days")).toBeInTheDocument();
 	expect(screen.queryByText("19% used")).not.toBeInTheDocument();
 	expect(screen.queryByText("54571452296")).not.toBeInTheDocument();
+});
+
+it("shows provider-reported resets and confirms before consuming one", async () => {
+	const accountWithReset = {
+		...activeAccount,
+		capacity: {
+			...capacity,
+			resetCredits: { availableCount: 1, nearestExpiresAt: "2026-09-21T00:15:00Z" },
+		},
+	};
+	const responseWithReset = { ...accountResponse, accounts: [accountWithReset, inactiveAccount] };
+	const responseAfterReset = {
+		...responseWithReset,
+		accounts: [{ ...accountWithReset, capacity: { ...accountWithReset.capacity, resetCredits: { availableCount: 0 } } }, inactiveAccount],
+	};
+	vi.stubGlobal("crypto", { randomUUID: () => "reset-request-1" });
+	getMock.mockResolvedValue({ data: responseWithReset });
+	postMock.mockImplementation((path: string) => {
+		if (path === "/api/v1/agents/codex/accounts/ensure") return Promise.resolve({ data: responseWithReset });
+		if (path === "/api/v1/agents/codex/accounts/{accountId}/reset-credit/consume") return Promise.resolve({ data: responseAfterReset });
+		return Promise.resolve({ data: {} });
+	});
+	const { container } = renderSection();
+	await screen.findByText("active@example.com");
+	fireEvent.click(container.querySelector(`[data-account-id="${activeAccount.id}"] button`) as HTMLButtonElement);
+	expect(await screen.findByText("1 reset available")).toBeInTheDocument();
+	fireEvent.click(screen.getByRole("button", { name: "Use reset" }));
+	expect(await screen.findByText("Use a usage-limit reset?")).toBeInTheDocument();
+	const resetButtons = screen.getAllByRole("button", { name: "Use reset" });
+	fireEvent.click(resetButtons[resetButtons.length - 1]);
+	await waitFor(() => expect(postMock).toHaveBeenCalledWith(
+		"/api/v1/agents/codex/accounts/{accountId}/reset-credit/consume",
+		{ params: { path: { accountId: activeAccount.id } }, body: { idempotencyKey: "reset-request-1" } },
+	));
+	await waitFor(() => expect(screen.queryByText("1 reset available")).not.toBeInTheDocument());
+	vi.unstubAllGlobals();
 });
 
 it("uses safe fallback headings and preserves stale values without exposing raw limit ids", async () => {

@@ -2,6 +2,7 @@ package codexappserver
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sort"
 	"strings"
@@ -31,8 +32,9 @@ type capacityWireBucket struct {
 }
 
 type capacityReadEnvelope struct {
-	RateLimits          capacityWireBucket            `json:"rateLimits"`
-	RateLimitsByLimitID map[string]capacityWireBucket `json:"rateLimitsByLimitId"`
+	RateLimits            capacityWireBucket                       `json:"rateLimits"`
+	RateLimitsByLimitID   map[string]capacityWireBucket            `json:"rateLimitsByLimitId"`
+	RateLimitResetCredits *codexproto.RateLimitResetCreditsSummary `json:"rateLimitResetCredits"`
 }
 
 func capacityObservationFromEnvelope(envelope capacityReadEnvelope, observedAt time.Time, partial bool) ports.CodexCapacityObservation {
@@ -52,8 +54,26 @@ func capacityObservationFromEnvelope(envelope capacityReadEnvelope, observedAt t
 	sort.Slice(additional, func(i, j int) bool { return additional[i].LimitID < additional[j].LimitID })
 	return ports.CodexCapacityObservation{
 		Plan: plan, Overall: overall, AdditionalBuckets: additional,
-		ObservedAt: observedAt.UTC(), Partial: partial,
+		ResetCredits: normalizeResetCredits(envelope.RateLimitResetCredits),
+		ObservedAt:   observedAt.UTC(), Partial: partial,
 	}
+}
+
+func normalizeResetCredits(summary *codexproto.RateLimitResetCreditsSummary) *domain.CodexResetCreditsSummary {
+	if summary == nil || summary.AvailableCount < 0 {
+		return nil
+	}
+	result := &domain.CodexResetCreditsSummary{AvailableCount: summary.AvailableCount}
+	for _, credit := range summary.Credits {
+		if credit.Status != codexproto.RateLimitResetCreditStatusAvailable || credit.ExpiresAt == nil || *credit.ExpiresAt <= 0 {
+			continue
+		}
+		expiresAt := time.Unix(*credit.ExpiresAt, 0).UTC()
+		if result.NearestExpiresAt == nil || expiresAt.Before(*result.NearestExpiresAt) {
+			result.NearestExpiresAt = &expiresAt
+		}
+	}
+	return result
 }
 
 func normalizeCapacityBucket(wire capacityWireBucket, fallbackID string, partial bool) *domain.CodexCapacityBucket {
@@ -161,6 +181,26 @@ func (c *accountClient) ReadUsage(ctx context.Context) (ports.CodexUsageObservat
 	return usageObservationFromResponse(response, time.Now().UTC()), nil
 }
 
+func (c *accountClient) ConsumeResetCredit(ctx context.Context, idempotencyKey string) (domain.CodexResetCreditOutcome, error) {
+	params := codexproto.ConsumeAccountRateLimitResetCreditParams{IdempotencyKey: idempotencyKey}
+	var response codexproto.ConsumeAccountRateLimitResetCreditResponse
+	if err := c.conn.request(ctx, codexproto.MethodAccountRateLimitResetCreditConsume, params, &response); err != nil {
+		return "", err
+	}
+	switch response.Outcome {
+	case codexproto.ConsumeAccountRateLimitResetCreditOutcomeReset:
+		return domain.CodexResetCreditReset, nil
+	case codexproto.ConsumeAccountRateLimitResetCreditOutcomeAlreadyRedeemed:
+		return domain.CodexResetCreditAlreadyRedeemed, nil
+	case codexproto.ConsumeAccountRateLimitResetCreditOutcomeNothingToReset:
+		return domain.CodexResetCreditNothingToReset, nil
+	case codexproto.ConsumeAccountRateLimitResetCreditOutcomeNoCredit:
+		return domain.CodexResetCreditNoCredit, nil
+	default:
+		return "", errors.New("Codex returned an unknown reset-credit outcome")
+	}
+}
+
 func usageObservationFromResponse(response codexproto.GetAccountTokenUsageResponse, observedAt time.Time) ports.CodexUsageObservation {
 	var latestDayTokens *int64
 	var latestDayStartDate *string
@@ -181,14 +221,31 @@ func usageObservationFromResponse(response codexproto.GetAccountTokenUsageRespon
 		value := *response.Summary.LifetimeTokens
 		lifetimeTokens = &value
 	}
+	var peakDailyTokens *int64
+	if response.Summary.PeakDailyTokens != nil && *response.Summary.PeakDailyTokens >= 0 {
+		value := *response.Summary.PeakDailyTokens
+		peakDailyTokens = &value
+	}
+	var longestRunningTurnSeconds *int64
+	if response.Summary.LongestRunningTurnSec != nil && *response.Summary.LongestRunningTurnSec >= 0 {
+		value := *response.Summary.LongestRunningTurnSec
+		longestRunningTurnSeconds = &value
+	}
 	var currentStreakDays *int64
 	if response.Summary.CurrentStreakDays != nil && *response.Summary.CurrentStreakDays >= 0 {
 		value := *response.Summary.CurrentStreakDays
 		currentStreakDays = &value
 	}
+	var longestStreakDays *int64
+	if response.Summary.LongestStreakDays != nil && *response.Summary.LongestStreakDays >= 0 {
+		value := *response.Summary.LongestStreakDays
+		longestStreakDays = &value
+	}
 	return ports.CodexUsageObservation{
 		LatestDayTokens: latestDayTokens, LatestDayStartDate: latestDayStartDate,
-		LifetimeTokens: lifetimeTokens, CurrentStreakDays: currentStreakDays,
+		LifetimeTokens: lifetimeTokens, PeakDailyTokens: peakDailyTokens,
+		LongestRunningTurnSeconds: longestRunningTurnSeconds,
+		CurrentStreakDays:         currentStreakDays, LongestStreakDays: longestStreakDays,
 		ObservedAt: observedAt.UTC(),
 	}
 }
