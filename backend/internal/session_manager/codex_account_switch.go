@@ -228,8 +228,11 @@ func (m *Manager) populateCodexAccountSwitchSessions(ctx context.Context, store 
 			wasRunning = m.chat != nil && m.chat.HasLiveChatController(rec.ID)
 		} else if rec.Harness == domain.HarnessCodex {
 			nativeID = strings.TrimSpace(rec.Metadata.AgentSessionID)
-			if rec.Metadata.RuntimeHandleID != "" {
-				wasRunning, _ = m.runtime.IsAlive(ctx, ports.RuntimeHandle{ID: rec.Metadata.RuntimeHandleID})
+			if strings.TrimSpace(rec.Metadata.RuntimeHandleID) != "" {
+				wasRunning, err = m.codexTUIWorkloadRunning(ctx, rec)
+				if err != nil {
+					return err
+				}
 			}
 		}
 		if rec.Harness == domain.HarnessCodex && wasRunning && nativeID == "" {
@@ -260,6 +263,38 @@ func (m *Manager) populateCodexAccountSwitchSessions(ctx context.Context, store 
 		sw.Sessions = append(sw.Sessions, item)
 	}
 	return nil
+}
+
+// codexTUIWorkloadRunning distinguishes a live terminal host from the Codex
+// process it was created to supervise. Interactive runtimes intentionally keep
+// their shell alive after Codex exits so users retain scrollback; that shell is
+// not a running Codex writer and must not block a global account switch.
+//
+// Runtime implementations without workload inspection retain the conservative
+// legacy behavior: a live host is treated as a live workload. Probe failures are
+// inconclusive and fail admission before any credential mutation.
+func (m *Manager) codexTUIWorkloadRunning(ctx context.Context, rec domain.SessionRecord) (bool, error) {
+	handle := ports.RuntimeHandle{ID: strings.TrimSpace(rec.Metadata.RuntimeHandleID)}
+	hostAlive, err := m.runtime.IsAlive(ctx, handle)
+	if err != nil {
+		return false, fmt.Errorf("inspect Codex runtime host for %s: %w", rec.ID, err)
+	}
+	if !hostAlive {
+		return false, nil
+	}
+	launchID := strings.TrimSpace(rec.Metadata.RuntimeLaunchID)
+	inspector, ok := m.runtime.(ports.SupervisedProcessInspector)
+	if !ok || launchID == "" {
+		return true, nil
+	}
+	workloadAlive, err := inspector.IsSupervisedProcessAlive(ctx, handle, ports.SupervisedProcessRef{
+		SessionID: rec.ID,
+		LaunchID:  launchID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("inspect Codex workload for %s: %w", rec.ID, err)
+	}
+	return workloadAlive, nil
 }
 
 func (m *Manager) runCodexAccountSwitch(ctx context.Context, credentials ports.CodexAccountCredentialManager, store ports.CodexAccountSwitchStore, sw domain.CodexAccountSwitch) {

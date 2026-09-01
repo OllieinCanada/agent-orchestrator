@@ -104,6 +104,43 @@ func TestCodexAccountSwitchRejectsRunningSessionWithoutExactNativeIdentity(t *te
 	}
 }
 
+func TestCodexAccountSwitchSkipsPreservedShellAfterCodexExits(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["exited-codex"] = domain.SessionRecord{
+		ID: "exited-codex", Harness: domain.HarnessCodex, Mode: domain.SessionModeTUI,
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "runtime-1", RuntimeLaunchID: "generation-1"},
+	}
+	workloadStopped := false
+	manager := New(Deps{Store: store, Runtime: &fakeRuntime{
+		aliveByHandle:           map[string]bool{"runtime-1": true},
+		supervisedAliveOverride: &workloadStopped,
+	}})
+	switchStore := &collectingCodexSwitchStore{}
+	switchRecord := domain.CodexAccountSwitch{ID: "switch-1"}
+	if err := manager.populateCodexAccountSwitchSessions(context.Background(), switchStore, &switchRecord); err != nil {
+		t.Fatal(err)
+	}
+	if len(switchStore.sessions) != 0 || len(switchRecord.Sessions) != 0 {
+		t.Fatalf("preserved shell was included in switch: %#v", switchStore.sessions)
+	}
+}
+
+func TestCodexAccountSwitchFailsClosedWhenWorkloadProbeFails(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["unknown-codex"] = domain.SessionRecord{
+		ID: "unknown-codex", Harness: domain.HarnessCodex, Mode: domain.SessionModeTUI,
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "runtime-1", RuntimeLaunchID: "generation-1"},
+	}
+	manager := New(Deps{Store: store, Runtime: &fakeRuntime{
+		aliveByHandle: map[string]bool{"runtime-1": true},
+		supervisedErr: errors.New("probe unavailable"),
+	}})
+	err := manager.populateCodexAccountSwitchSessions(context.Background(), &collectingCodexSwitchStore{}, &domain.CodexAccountSwitch{ID: "switch-1"})
+	if err == nil || !strings.Contains(err.Error(), "inspect Codex workload") {
+		t.Fatalf("populate error = %v, want workload inspection failure", err)
+	}
+}
+
 func TestCodexAccountSwitchRecordsRunningSessionForSameNativeResume(t *testing.T) {
 	store := newFakeStore()
 	store.sessions["running-codex"] = domain.SessionRecord{
