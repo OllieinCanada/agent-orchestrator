@@ -656,7 +656,6 @@
 	"settings.codexAccounts.switchRecoveryFailed": "Could not retry the failed Codex sessions.",
 	"settings.codexAccounts.switchTitle": "Switch the device Codex account?",
 	"settings.codexAccounts.switchingSessions": "Switching the device Codex account and restarting AO sessions",
-	"settings.codexAccounts.globalScope": "The selected account is the device’s current Codex account. AO automatically restarts only sessions it owns.",
 	"settings.codexAccounts.usage": "Usage",
 	"settings.codexAccounts.usageDaily": "Daily",
 	"settings.codexAccounts.usageLifetime": "Lifetime",

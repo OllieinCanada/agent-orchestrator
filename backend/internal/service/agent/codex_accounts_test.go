@@ -44,6 +44,7 @@ func (f *fakeCodexAccountFactory) Capabilities(context.Context) domain.CodexAcco
 type fakeCodexAccountClient struct {
 	read            ports.CodexAccountObservation
 	readErr         error
+	readFn          func(context.Context, bool) (ports.CodexAccountObservation, error)
 	readStarted     chan struct{}
 	readRelease     chan struct{}
 	capacity        ports.CodexCapacityObservation
@@ -54,7 +55,10 @@ type fakeCodexAccountClient struct {
 	events          chan ports.CodexAccountEvent
 }
 
-func (c *fakeCodexAccountClient) Read(ctx context.Context, _ bool) (ports.CodexAccountObservation, error) {
+func (c *fakeCodexAccountClient) Read(ctx context.Context, refreshToken bool) (ports.CodexAccountObservation, error) {
+	if c.readFn != nil {
+		return c.readFn(ctx, refreshToken)
+	}
 	if c.readStarted != nil {
 		select {
 		case c.readStarted <- struct{}{}:
@@ -308,6 +312,68 @@ func TestBootstrapImportsOpaqueDeviceCredentialWithoutMutatingDeviceHome(t *test
 	}
 	if _, err := os.Stat(filepath.Join(root, "runtime")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("bootstrap created an obsolete private runtime: %v", err)
+	}
+}
+
+func TestGlobalReconciliationKeepsMatchingDeviceAccountActiveWithoutProactiveRefresh(t *testing.T) {
+	root := t.TempDir()
+	globalHome := filepath.Join(root, "global-codex")
+	if err := ensurePrivateDirectory(globalHome); err != nil {
+		t.Fatal(err)
+	}
+	globalCredential := filepath.Join(globalHome, codexCredentialFilename)
+	credential := []byte("opaque-codex-credential\x00\xff")
+	if err := writePrivateFileAtomic(globalCredential, credential); err != nil {
+		t.Fatal(err)
+	}
+	email := "device@example.com"
+	observation := ports.CodexAccountObservation{
+		Authentication: domain.AgentAuthenticationAuthorized,
+		Method:         domain.CodexAuthMethodChatGPT,
+		Email:          &email,
+	}
+	state := &fakeCodexAccountStateStore{
+		active: domain.CodexActiveAccount{AccountID: testAccountID, Revision: 1},
+		found:  true,
+	}
+	manager := newCodexAccountManager(
+		context.Background(),
+		filepath.Join(root, "accounts"),
+		filepath.Join(root, "pending"),
+		filepath.Join(root, "staging"),
+		globalHome,
+		nil,
+		state,
+		nil,
+	)
+	manager.catalog.newID = func() string { return testAccountID }
+	record := commitTestAccount(t, manager.catalog, manager.pendingRoot, "b60a377d-da68-4a61-86f2-f31f04c571f2", observation)
+	if err := writePrivateFileAtomic(filepath.Join(record.Home, codexCredentialFilename), credential); err != nil {
+		t.Fatal(err)
+	}
+	var refreshRequests []bool
+	manager.factory = &fakeCodexAccountFactory{
+		capabilities: supportedCodexAccountCapabilities(),
+		open: func(ports.CodexAccountContext) (ports.CodexAccountClient, error) {
+			return &fakeCodexAccountClient{readFn: func(_ context.Context, refresh bool) (ports.CodexAccountObservation, error) {
+				refreshRequests = append(refreshRequests, refresh)
+				if refresh {
+					return ports.CodexAccountObservation{}, errors.New("proactive refresh rejected for copied credential")
+				}
+				return observation, nil
+			}}, nil
+		},
+	}
+
+	if err := manager.bootstrapInner(); err != nil {
+		t.Fatal(err)
+	}
+	view := manager.cached()
+	if view.ActiveAccountID != testAccountID || view.UnmanagedGlobalAccount != nil || len(view.Accounts) != 1 || !view.Accounts[0].Active {
+		t.Fatalf("reconciled device account = %#v, refresh requests = %#v", view, refreshRequests)
+	}
+	if slices.Contains(refreshRequests, true) {
+		t.Fatalf("reconciliation requested proactive refresh: %#v", refreshRequests)
 	}
 }
 

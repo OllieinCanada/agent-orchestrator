@@ -669,7 +669,6 @@
 	"settings.codexAccounts.switchRecoveryFailed": "실패한 Codex 세션을 다시 시도하지 못했습니다.",
 	"settings.codexAccounts.switchTitle": "기기의 Codex 계정을 전환할까요?",
 	"settings.codexAccounts.switchingSessions": "기기 Codex 계정을 전환하고 AO 세션을 다시 시작하는 중",
-	"settings.codexAccounts.globalScope": "선택한 계정이 기기의 현재 Codex 계정입니다. AO는 자신이 소유한 세션만 자동으로 다시 시작합니다.",
 	"settings.codexAccounts.usage": "사용량",
 	"settings.codexAccounts.usageDaily": "일일",
 	"settings.codexAccounts.usageLifetime": "전체",

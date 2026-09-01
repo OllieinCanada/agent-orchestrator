@@ -669,7 +669,6 @@
 	"settings.codexAccounts.switchRecoveryFailed": "Die fehlgeschlagenen Codex-Sitzungen konnten nicht erneut gestartet werden.",
 	"settings.codexAccounts.switchTitle": "Codex-Konto des Geräts wechseln?",
 	"settings.codexAccounts.switchingSessions": "Codex-Konto des Geräts wird gewechselt und AO-Sitzungen werden neu gestartet",
-	"settings.codexAccounts.globalScope": "Das ausgewählte Konto ist das aktuelle Codex-Konto des Geräts. AO startet automatisch nur eigene Sitzungen neu.",
 	"settings.codexAccounts.usage": "Nutzung",
 	"settings.codexAccounts.usageDaily": "Täglich",
 	"settings.codexAccounts.usageLifetime": "Gesamt",

@@ -1197,7 +1197,13 @@ func (m *codexAccountManager) verifyOpaqueGlobalCredential(credential []byte) (p
 	if err != nil {
 		return ports.CodexAccountObservation{}, err
 	}
-	observation, readErr := client.Read(verifyCtx, true)
+	// Reconciliation only needs to prove that the opaque global credential is
+	// usable from a file-backed home. A proactive refresh here can race Codex's
+	// live global credential and rotate the copied refresh token, incorrectly
+	// classifying the device account as unmanaged. Strict refresh remains part
+	// of login and switch admission, where no duplicate live credential is being
+	// introduced.
+	observation, readErr := client.Read(verifyCtx, false)
 	_ = client.Close()
 	if readErr != nil {
 		return ports.CodexAccountObservation{}, readErr

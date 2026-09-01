@@ -52,6 +52,7 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 	const activeAccount = data?.accounts.find((account) => account.active);
 	const currentSwitch = data?.currentSwitch;
 	const globalSwitchSupported = data?.capabilities.globalSwitch.state === "supported";
+	const switchSourceAvailable = Boolean(data?.activeAccountId && activeAccount && !data.unmanagedGlobalAccount);
 	const switchActive = Boolean(currentSwitch && !["completed", "cancelled", "failed"].includes(currentSwitch.phase));
 
 	const beginLogin = useCallback(async () => {
@@ -154,7 +155,7 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 	}, [expandedAccount, queryClient]);
 
 	const confirmSwitch = useCallback(async () => {
-		if (!confirmAccount || !data) return;
+		if (!confirmAccount || !data?.activeAccountId || data.unmanagedGlobalAccount) return;
 		let request = switchRequestRef.current;
 		if (!request || request.accountId !== confirmAccount.id || request.revision !== data.accountRevision) {
 			request = {
@@ -228,7 +229,6 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 						<p className="mt-1 text-muted-foreground">{data.unmanagedGlobalAccount.reason}</p>
 					</div>
 				) : null}
-				{data && (activeAccount || data.unmanagedGlobalAccount) ? <p className="border-b border-border px-4 py-2.5 text-xs text-muted-foreground">{t("settings.codexAccounts.globalScope")}</p> : null}
 				{announcement ? <p className="sr-only" role="status" aria-live="polite">{announcement}</p> : null}
 				{loginWorkflow ? (
 					<div className="border-b border-border px-4 py-3" data-testid="codex-account-pending-row">
@@ -249,7 +249,7 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 				{accountsError ? <p className="px-4 py-3 text-xs text-error" role="alert">{accountsError}</p> : null}
 				<div className="divide-y divide-border">
 					{data?.accounts.map((account) => (
-						<CodexAccountRow key={account.id} account={account} expanded={expandedAccount === account.id} mutationDisabled={Boolean(loginWorkflow) || switchActive || !globalSwitchSupported} switchUnavailableReason={data.capabilities.globalSwitch.state === "supported" ? undefined : data.capabilities.globalSwitch.reason} busy={busy === account.id} onToggle={() => toggleAccount(account)} onSwitch={() => { switchRequestRef.current = null; setConfirmAccount(account); }} />
+						<CodexAccountRow key={account.id} account={account} expanded={expandedAccount === account.id} switchSourceAvailable={switchSourceAvailable} mutationDisabled={Boolean(loginWorkflow) || switchActive || !globalSwitchSupported} switchUnavailableReason={data.capabilities.globalSwitch.state === "supported" ? undefined : data.capabilities.globalSwitch.reason} busy={busy === account.id} onToggle={() => toggleAccount(account)} onSwitch={() => { switchRequestRef.current = null; setConfirmAccount(account); }} />
 					))}
 				</div>
 				{currentSwitch?.canRecover ? (
@@ -259,14 +259,15 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 					</div>
 				) : null}
 			</AgentProviderGroup>
-			<ConfirmDialog open={Boolean(confirmAccount)} title={t("settings.codexAccounts.switchTitle")} description={t("settings.codexAccounts.switchDescription", { label: confirmAccount?.label ?? "" })} confirmLabel={t("settings.codexAccounts.switchConfirm")} busy={Boolean(busy)} onConfirm={() => void confirmSwitch()} onOpenChange={(open) => { if (!open && !busy) { switchRequestRef.current = null; setConfirmAccount(null); } }} />
+			<ConfirmDialog open={Boolean(confirmAccount && switchSourceAvailable)} title={t("settings.codexAccounts.switchTitle")} description={t("settings.codexAccounts.switchDescription", { label: confirmAccount?.label ?? "" })} confirmLabel={t("settings.codexAccounts.switchConfirm")} busy={Boolean(busy)} onConfirm={() => void confirmSwitch()} onOpenChange={(open) => { if (!open && !busy) { switchRequestRef.current = null; setConfirmAccount(null); } }} />
 		</SettingsSection>
 	);
 }
 
-function CodexAccountRow({ account, expanded, mutationDisabled, switchUnavailableReason, busy, onToggle, onSwitch }: {
+function CodexAccountRow({ account, expanded, switchSourceAvailable, mutationDisabled, switchUnavailableReason, busy, onToggle, onSwitch }: {
 	account: CodexAccount;
 	expanded: boolean;
+	switchSourceAvailable: boolean;
 	mutationDisabled: boolean;
 	switchUnavailableReason?: string;
 	busy: boolean;
@@ -294,7 +295,7 @@ function CodexAccountRow({ account, expanded, mutationDisabled, switchUnavailabl
 					</div>
 					<ChevronDown className={`ml-auto mt-1 size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? "" : "-rotate-90"}`} aria-hidden="true" />
 				</button>
-				{!account.active && account.status === "valid" && authorized ? <Button type="button" size="sm" variant="outline" disabled={mutationDisabled || busy} title={switchUnavailableReason} onClick={onSwitch}>{t("settings.codexAccounts.switchAction")}</Button> : null}
+				{switchSourceAvailable && !account.active && account.status === "valid" && authorized ? <Button type="button" size="sm" variant="outline" disabled={mutationDisabled || busy} title={switchUnavailableReason} onClick={onSwitch}>{t("settings.codexAccounts.switchAction")}</Button> : null}
 			</div>
 			{expanded ? <CodexAccountDetails account={account} /> : null}
 		</div>

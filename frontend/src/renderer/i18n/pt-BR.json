@@ -682,7 +682,6 @@
 	"settings.codexAccounts.switchRecoveryFailed": "Não foi possível tentar novamente as sessões Codex com falha.",
 	"settings.codexAccounts.switchTitle": "Mudar a conta Codex do dispositivo?",
 	"settings.codexAccounts.switchingSessions": "Mudando a conta Codex do dispositivo e reiniciando sessões do AO",
-	"settings.codexAccounts.globalScope": "A conta selecionada é a conta Codex atual do dispositivo. O AO reinicia automaticamente apenas as sessões que ele gerencia.",
 	"settings.codexAccounts.usage": "Uso",
 	"settings.codexAccounts.usageDaily": "Diário",
 	"settings.codexAccounts.usageLifetime": "Total",

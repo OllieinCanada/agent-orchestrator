@@ -28,6 +28,7 @@ type fakeCodexAccounts struct {
 	cancelledOperation string
 	switchConfig       ports.CodexAccountSwitchConfig
 	switchResult       domain.CodexAccountSwitch
+	switchErr          error
 }
 
 func (f *fakeCodexAccounts) CachedCodexAccounts(context.Context) (agentsvc.CodexAccounts, error) {
@@ -58,7 +59,7 @@ func (f *fakeCodexAccounts) CancelCodexAccountLogin(_ context.Context, id string
 }
 func (f *fakeCodexAccounts) StartCodexAccountSwitch(_ context.Context, cfg ports.CodexAccountSwitchConfig) (domain.CodexAccountSwitch, error) {
 	f.switchConfig = cfg
-	return f.switchResult, nil
+	return f.switchResult, f.switchErr
 }
 func (f *fakeCodexAccounts) GetCodexAccountSwitch(context.Context, string) (domain.CodexAccountSwitch, error) {
 	return f.switchResult, nil
@@ -165,6 +166,19 @@ func TestCodexAccountSwitchRequiresIdempotencyAndRedactsPrivateIdentity(t *testi
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("switch leaked %q: %s", forbidden, body)
 		}
+	}
+}
+
+func TestCodexAccountSwitchWithoutReconciledSourceReturnsTypedConflict(t *testing.T) {
+	fake := &fakeCodexAccounts{
+		result:    codexAccountsFixture(),
+		switchErr: ports.ErrCodexActiveAccountUnavailable,
+	}
+	srv := newCodexAccountServer(t, fake)
+	defer srv.Close()
+	body, status, _ := doRequest(t, srv, http.MethodPost, "/api/v1/agents/codex/account-switches", `{"targetAccountId":"target","expectedAccountRevision":3,"idempotencyKey":"request-key"}`)
+	if status != http.StatusConflict || !strings.Contains(string(body), `"code":"CODEX_ACCOUNT_AUTH_UNVERIFIED"`) {
+		t.Fatalf("unreconciled switch status=%d body=%s", status, body)
 	}
 }
 

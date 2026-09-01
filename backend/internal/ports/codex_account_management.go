@@ -12,6 +12,9 @@ var (
 	ErrCodexAccountSwitchInProgress = errors.New("codex account switch already in progress")
 	// ErrCodexAccountAlreadyActive rejects selecting the current account.
 	ErrCodexAccountAlreadyActive = errors.New("codex account is already active")
+	// ErrCodexActiveAccountUnavailable means the device account has not been
+	// reconciled to one safe AO-managed source credential.
+	ErrCodexActiveAccountUnavailable = errors.New("active codex account is unavailable")
 	// ErrCodexAccountSwitchNotFound means the durable operation does not exist.
 	ErrCodexAccountSwitchNotFound = errors.New("codex account switch not found")
 	// ErrCodexAccountSwitchCancellationUnsafe marks the durable stop boundary.

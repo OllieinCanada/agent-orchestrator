@@ -65,8 +65,31 @@ it("shows active-first account cards with correct remaining capacity", async () 
 	expect(await screen.findByText("active@example.com")).toBeInTheDocument();
 	expect(screen.getByText("In use")).toBeInTheDocument();
 	expect(screen.getAllByText(/96% remaining/).length).toBeGreaterThan(0);
+	expect(screen.queryByText(/The selected account is the device/)).not.toBeInTheDocument();
 	expect(screen.queryByText(/credential/i)).not.toBeInTheDocument();
 	expect(screen.queryByText(/billing/i)).not.toBeInTheDocument();
+});
+
+it("does not offer switching when the device account has no reconciled source", async () => {
+	const unreconciledAccount = { ...activeAccount, active: false };
+	const unreconciledResponse = {
+		...accountResponse,
+		activeAccountId: undefined,
+		accounts: [unreconciledAccount],
+		unmanagedGlobalAccount: {
+			label: activeAccount.label,
+			authMethod: activeAccount.authMethod,
+			accountEmail: activeAccount.accountEmail,
+			reasonCode: "global_credential_store_unsupported",
+			reason: "This Codex account is active on the device, but its credential store cannot be switched safely.",
+		},
+	};
+	getMock.mockResolvedValue({ data: unreconciledResponse });
+	postMock.mockResolvedValue({ data: unreconciledResponse });
+
+	renderSection();
+	expect(await screen.findByText(unreconciledResponse.unmanagedGlobalAccount.reason)).toBeInTheDocument();
+	expect(screen.queryByRole("button", { name: "Switch to this account" })).not.toBeInTheDocument();
 });
 
 it("presents plan, general and model usage limits with remaining-capacity meters", async () => {

@@ -682,7 +682,6 @@
 	"settings.codexAccounts.switchRecoveryFailed": "Impossible de relancer les sessions Codex en échec.",
 	"settings.codexAccounts.switchTitle": "Changer le compte Codex de l’appareil ?",
 	"settings.codexAccounts.switchingSessions": "Changement du compte Codex de l’appareil et redémarrage des sessions AO",
-	"settings.codexAccounts.globalScope": "Le compte sélectionné est le compte Codex actuel de l’appareil. AO ne redémarre automatiquement que les sessions qu’il gère.",
 	"settings.codexAccounts.usage": "Utilisation",
 	"settings.codexAccounts.usageDaily": "Quotidienne",
 	"settings.codexAccounts.usageLifetime": "Totale",

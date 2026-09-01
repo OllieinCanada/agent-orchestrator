@@ -114,6 +114,8 @@ func writeCodexAccountSwitchError(w http.ResponseWriter, r *http.Request, err er
 		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "CODEX_ACCOUNT_SWITCH_NOT_FOUND", "Codex account switch not found", nil)
 	case errors.Is(err, ports.ErrCodexAccountAlreadyActive):
 		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "CODEX_ACCOUNT_ALREADY_ACTIVE", "This Codex account is already active", nil)
+	case errors.Is(err, ports.ErrCodexActiveAccountUnavailable):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "CODEX_ACCOUNT_AUTH_UNVERIFIED", "The device's current Codex account is not available for switching", nil)
 	case errors.Is(err, ports.ErrCodexAccountRevisionConflict):
 		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "CODEX_ACCOUNT_REVISION_CONFLICT", "The active Codex account changed", nil)
 	case errors.Is(err, ports.ErrCodexAccountSwitchInProgress):

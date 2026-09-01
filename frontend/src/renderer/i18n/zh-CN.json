@@ -651,7 +651,6 @@
 	"settings.codexAccounts.switchRecoveryFailed": "无法重试失败的 Codex 会话。",
 	"settings.codexAccounts.switchTitle": "切换设备的 Codex 账户？",
 	"settings.codexAccounts.switchingSessions": "正在切换设备 Codex 账户并重启 AO 会话",
-	"settings.codexAccounts.globalScope": "所选账户是设备当前的 Codex 账户。AO 只会自动重启自己拥有的会话。",
 	"settings.codexAccounts.usage": "用量",
 	"settings.codexAccounts.usageDaily": "每日",
 	"settings.codexAccounts.usageLifetime": "累计",

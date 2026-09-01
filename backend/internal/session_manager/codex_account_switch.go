@@ -21,6 +21,8 @@ var (
 	ErrCodexAccountSwitchInProgress = ports.ErrCodexAccountSwitchInProgress
 	// ErrCodexAccountAlreadyActive rejects selecting the current account.
 	ErrCodexAccountAlreadyActive = ports.ErrCodexAccountAlreadyActive
+	// ErrCodexActiveAccountUnavailable rejects switching without a reconciled source account.
+	ErrCodexActiveAccountUnavailable = ports.ErrCodexActiveAccountUnavailable
 	// ErrCodexAccountSwitchNotFound means the durable operation does not exist.
 	ErrCodexAccountSwitchNotFound = ports.ErrCodexAccountSwitchNotFound
 	// ErrCodexAccountSwitchCancellationUnsafe marks the durable stop boundary.
@@ -132,7 +134,7 @@ func (m *Manager) StartCodexAccountSwitch(ctx context.Context, cfg ports.CodexAc
 	}
 	current := credentials.CurrentCodexActiveAccount()
 	if strings.TrimSpace(current.AccountID) == "" || current.Revision < 1 {
-		return domain.CodexAccountSwitch{}, errors.New("no active Codex account is available")
+		return domain.CodexAccountSwitch{}, ErrCodexActiveAccountUnavailable
 	}
 	if current.AccountID == cfg.TargetAccountID {
 		return domain.CodexAccountSwitch{}, ErrCodexAccountAlreadyActive
