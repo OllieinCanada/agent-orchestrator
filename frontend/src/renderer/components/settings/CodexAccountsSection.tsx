@@ -1,4 +1,4 @@
-import { ChevronDown, CircleAlert, CircleCheck, LoaderCircle, Plus, RotateCcw, UserRound, X } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, CircleAlert, CircleCheck, LoaderCircle, Plus, RotateCcw, UserRound, X } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -30,6 +30,7 @@ import {
 import { ConfirmDialog } from "../ConfirmDialog";
 import { TerminalPane } from "../TerminalPane";
 import { Button } from "../ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { AgentProviderGroup } from "./AgentProviderGroup";
 import { SettingsSection } from "./SettingsSection";
 
@@ -57,6 +58,8 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 	const currentSwitch = data?.currentSwitch;
 	const resetCreditSupported = data?.capabilities.resetCreditConsume.state === "supported";
 	const switchSourceAvailable = Boolean(data?.activeAccountId && activeAccount && !data.unmanagedGlobalAccount);
+	const switchTargets = data?.accounts.filter((account) => !account.active) ?? [];
+	const switchUnavailableReason = data?.capabilities.globalSwitch.state === "supported" ? undefined : data?.capabilities.globalSwitch.reason;
 	const switchActive = Boolean(currentSwitch && !["completed", "cancelled", "failed"].includes(currentSwitch.phase));
 
 	const beginLogin = useCallback(async () => {
@@ -242,6 +245,34 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 				action={(
 					<div className="flex items-center gap-2">
 						{switchActive ? <LoaderCircle className="size-5 animate-spin text-muted-foreground" aria-label={currentSwitch?.reason} /> : null}
+						{switchSourceAvailable && switchTargets.length > 0 ? (
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button type="button" size="sm" variant="outline" disabled={Boolean(loginWorkflow) || switchActive || Boolean(busy) || Boolean(switchUnavailableReason)} title={switchUnavailableReason}>
+										<ArrowRightLeft aria-hidden="true" /> {t("settings.codexAccounts.switchConfirm")}
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="end" className="min-w-64">
+									{switchTargets.map((account) => {
+										const authorized = account.authentication.state === "authorized" || account.authentication.state === "not_applicable";
+										const summary = [formatAuthMethod(account.authMethod), formatPlanName(account.capacity.plan)].filter(Boolean).join(" · ");
+										return (
+											<DropdownMenuItem
+												key={account.id}
+												disabled={account.status !== "valid" || !authorized}
+												onSelect={() => { switchRequestRef.current = null; setConfirmAccount(account); }}
+											>
+												<UserRound aria-hidden="true" />
+												<div className="min-w-0">
+													<p className="truncate text-foreground">{account.label}</p>
+													{summary ? <p className="truncate text-micro text-muted-foreground">{summary}</p> : null}
+												</div>
+											</DropdownMenuItem>
+										);
+									})}
+								</DropdownMenuContent>
+							</DropdownMenu>
+						) : null}
 						<Button type="button" size="sm" title={accountsError ?? undefined} onClick={() => void beginLogin()} disabled={Boolean(loginWorkflow) || switchActive || Boolean(busy) || data?.capabilities.nativeLogin.state !== "supported"}>
 							<Plus aria-hidden="true" /> {t("settings.codexAccounts.add")}
 						</Button>
@@ -275,7 +306,7 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 				{accountsError ? <p className="px-4 py-3 text-xs text-error" role="alert">{accountsError}</p> : null}
 				<div className="divide-y divide-border">
 					{data?.accounts.map((account) => (
-						<CodexAccountRow key={account.id} account={account} expanded={expandedAccount === account.id} switchSourceAvailable={switchSourceAvailable} resetCreditSupported={resetCreditSupported} mutationDisabled={Boolean(loginWorkflow) || switchActive || Boolean(busy)} switchUnavailableReason={data.capabilities.globalSwitch.state === "supported" ? undefined : data.capabilities.globalSwitch.reason} busy={busy === account.id} resetBusy={busy === `reset:${account.id}`} onToggle={() => toggleAccount(account)} onSwitch={() => { switchRequestRef.current = null; setConfirmAccount(account); }} onUseReset={() => setConfirmResetAccount(account)} />
+						<CodexAccountRow key={account.id} account={account} expanded={expandedAccount === account.id} resetCreditSupported={resetCreditSupported} mutationDisabled={Boolean(loginWorkflow) || switchActive || Boolean(busy)} resetBusy={busy === `reset:${account.id}`} onToggle={() => toggleAccount(account)} onUseReset={() => setConfirmResetAccount(account)} />
 					))}
 				</div>
 				{currentSwitch?.canRecover ? (
@@ -291,17 +322,13 @@ export function CodexAccountsSection({ titleHidden }: { titleHidden?: boolean })
 	);
 }
 
-function CodexAccountRow({ account, expanded, switchSourceAvailable, resetCreditSupported, mutationDisabled, switchUnavailableReason, busy, resetBusy, onToggle, onSwitch, onUseReset }: {
+function CodexAccountRow({ account, expanded, resetCreditSupported, mutationDisabled, resetBusy, onToggle, onUseReset }: {
 	account: CodexAccount;
 	expanded: boolean;
-	switchSourceAvailable: boolean;
 	resetCreditSupported: boolean;
 	mutationDisabled: boolean;
-	switchUnavailableReason?: string;
-	busy: boolean;
 	resetBusy: boolean;
 	onToggle: () => void;
-	onSwitch: () => void;
 	onUseReset: () => void;
 }) {
 	const { t } = useTranslation();
@@ -326,16 +353,7 @@ function CodexAccountRow({ account, expanded, switchSourceAvailable, resetCredit
 					<ChevronDown className={`ml-auto mt-1 size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? "" : "-rotate-90"}`} aria-hidden="true" />
 				</button>
 			</div>
-			{expanded ? (
-				<>
-					<CodexAccountDetails account={account} resetCreditSupported={resetCreditSupported} mutationDisabled={mutationDisabled} resetBusy={resetBusy} onUseReset={onUseReset} />
-					{switchSourceAvailable && !account.active && account.status === "valid" && authorized ? (
-						<div className="ml-9 mt-4 flex justify-end border-t border-border/70 pt-3">
-							<Button type="button" size="sm" variant="outline" disabled={mutationDisabled || busy || Boolean(switchUnavailableReason)} title={switchUnavailableReason} onClick={onSwitch}>{t("settings.codexAccounts.switchAction")}</Button>
-						</div>
-					) : null}
-				</>
-			) : null}
+			{expanded ? <CodexAccountDetails account={account} resetCreditSupported={resetCreditSupported} mutationDisabled={mutationDisabled} resetBusy={resetBusy} onUseReset={onUseReset} /> : null}
 		</div>
 	);
 }

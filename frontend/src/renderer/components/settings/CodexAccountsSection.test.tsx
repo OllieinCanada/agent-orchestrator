@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { useUiStore } from "../../stores/ui-store";
 import { CodexAccountsSection } from "./CodexAccountsSection";
@@ -334,10 +335,10 @@ it("starts a global switch with the displayed account revision", async () => {
 	renderSection();
 	await screen.findByText("other@example.com");
 	expect(screen.queryByRole("button", { name: "Switch to this account" })).not.toBeInTheDocument();
-	const inactiveRow = document.querySelector(`[data-account-id="${inactiveAccount.id}"]`);
-	fireEvent.click(inactiveRow?.querySelector("button") as HTMLButtonElement);
-	fireEvent.click(screen.getByRole("button", { name: "Switch to this account" }));
-	fireEvent.click(await screen.findByRole("button", { name: "Switch account" }));
+	await userEvent.click(screen.getByRole("button", { name: "Switch account" }));
+	await userEvent.click(await screen.findByRole("menuitem", { name: /other@example.com/ }));
+	const dialog = await screen.findByRole("dialog");
+	fireEvent.click(within(dialog).getByRole("button", { name: "Switch account" }));
 	await waitFor(() => expect(postMock).toHaveBeenCalledWith("/api/v1/agents/codex/account-switches", {
 		body: { targetAccountId: inactiveAccount.id, expectedAccountRevision: 3, idempotencyKey: "idempotency-1" },
 	}));
