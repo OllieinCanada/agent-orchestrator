@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { PanelRight, Plus } from "lucide-react";
+import { LoaderCircle, PanelRight, Plus } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import {
 	useCallback,
@@ -41,6 +41,7 @@ import { SessionTopbarHost } from "./SessionTopbarPortal";
 import { TerminalSwitchAgentButton } from "./TerminalSwitchAgentButton";
 import { TopbarButton } from "./TopbarButton";
 import { useBrowserView } from "../hooks/useBrowserView";
+import { useCodexAccountsQuery } from "../hooks/useCodexProfilesQuery";
 import { useFileAnnotation } from "../hooks/useFileAnnotation";
 import { useResizable } from "../hooks/useResizable";
 import {
@@ -474,6 +475,15 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	useEffect(() => stopTerminalLiveResize, [stopTerminalLiveResize]);
 
 	const session = workspaces.flatMap((workspace) => workspace.sessions).find((s) => s.id === sessionId);
+	const codexAccounts = useCodexAccountsQuery(session?.provider === "codex");
+	const codexAccountSwitch = codexAccounts.data?.currentSwitch;
+	const codexAccountSwitchBlocksSession = Boolean(
+		session?.provider === "codex" &&
+			codexAccountSwitch &&
+			!["completed", "cancelled", "failed"].includes(codexAccountSwitch.phase) &&
+			(codexAccountSwitch.sessions.length === 0 ||
+				codexAccountSwitch.sessions.some((entry) => entry.sessionId === session.id)),
+	);
 	const interfaceSwitch = useSessionInterfaceTransition(session?.id);
 	const reviewerQuery = useQuery({
 		queryKey: ["session-reviews", sessionId],
@@ -1335,6 +1345,20 @@ export function SessionView({ sessionId }: SessionViewProps) {
 
 	return (
 		<div className="relative flex h-full min-h-0 flex-col bg-background text-foreground" data-testid="session-detail">
+			{codexAccountSwitchBlocksSession ? (
+				<div
+					aria-live="assertive"
+					className="absolute inset-0 z-50 grid place-items-center bg-background/80 p-6 backdrop-blur-sm"
+					data-testid="codex-account-switch-blocker"
+					role="status"
+				>
+					<div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border border-border bg-card px-6 py-5 text-center shadow-lg">
+						<LoaderCircle className="size-5 animate-spin text-passive" aria-hidden="true" />
+						<p className="text-sm font-medium">{t("settings.codexAccounts.switchingSessions")}</p>
+						<p className="text-xs text-passive">{codexAccountSwitch?.reason}</p>
+					</div>
+				</div>
+			) : null}
 			<div
 				className="session-split relative flex min-h-0 flex-1 overflow-hidden"
 				data-testid="panel-group"

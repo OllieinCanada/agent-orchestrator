@@ -18,7 +18,7 @@ import {
 export type { Theme, ThemePreference, ThemeStyle } from "../lib/theme";
 export { readStoredThemePreference, readStoredThemeStyle, resolveTheme } from "../lib/theme";
 
-export type GlobalSettingsSection = "general" | "cloud" | "mobile" | "shortcuts" | "updates" | "help";
+export type GlobalSettingsSection = "general" | "agents" | "cloud" | "mobile" | "shortcuts" | "updates" | "help";
 
 export type SettingsModal =
 	| { scope: "global"; section?: GlobalSettingsSection }
@@ -95,6 +95,8 @@ export type UiState = {
 	// session view (tabs beside the session's pane) and the standalone terminals
 	// view read it, so whichever one is on screen shows the same shell.
 	activeShellTerminalHandleId: string | null;
+	/** Active inline account-login workflow. This is daemon-lifetime UI state only. */
+	codexAccountLoginTerminal: CodexAccountLoginTerminalWorkflow | null;
 	// Which terminal each mounted session is actually showing. The session pane
 	// renders one terminal at a time, so opening a shell or the reviewer swaps
 	// the agent's terminal off screen even though the route still points at that
@@ -137,6 +139,12 @@ export type UiState = {
 	requestCreateProjectFromPath: (path: string) => void;
 	requestNewShellTerminal: () => void;
 	setActiveShellTerminal: (handleId: string | null) => void;
+	startCodexAccountLoginTerminal: (operationId: string, terminal: CodexAccountLoginTerminal) => void;
+	updateCodexAccountLoginTerminal: (
+		handleId: string,
+		update: Partial<Pick<CodexAccountLoginTerminalWorkflow, "phase" | "reason">>,
+	) => void;
+	clearCodexAccountLoginTerminal: (handleId?: string) => void;
 	setVisibleTerminalKind: (sessionId: string, kind: TerminalTarget["kind"]) => void;
 	clearVisibleTerminalKind: (sessionId: string) => void;
 };
@@ -145,6 +153,29 @@ export type OrchestratorReplacementFailure = {
 	message: string;
 	code?: string;
 	requestId?: string;
+};
+
+export type CodexAccountLoginTerminalPhase =
+	| "running"
+	| "verifying"
+	| "unauthorized"
+	| "unverified"
+	| "failed"
+	| "expired"
+	| "closing";
+
+export type CodexAccountLoginTerminal = {
+	handleId: string;
+	title: string;
+	createdAt: string;
+};
+
+export type CodexAccountLoginTerminalWorkflow = {
+	operationId: string;
+	terminal: CodexAccountLoginTerminal;
+	phase: CodexAccountLoginTerminalPhase;
+	reason?: string;
+	startedAt: number;
 };
 
 const sidebarStorageKey = "ao.sidebar.open";
@@ -209,6 +240,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 	folderDropRequest: null,
 	newShellTerminalNonce: 0,
 	activeShellTerminalHandleId: null,
+	codexAccountLoginTerminal: null,
 	visibleTerminalKindBySession: {},
 	setWorkbenchTab: (workbenchTab) => set({ workbenchTab }),
 	setThemePreference: (themePreference) => {
@@ -405,6 +437,23 @@ export const useUiStore = create<UiState>((set, get) => ({
 		set((state) => ({ folderDropRequest: { path, nonce: (state.folderDropRequest?.nonce ?? 0) + 1 } })),
 	requestNewShellTerminal: () => set((state) => ({ newShellTerminalNonce: state.newShellTerminalNonce + 1 })),
 	setActiveShellTerminal: (activeShellTerminalHandleId) => set({ activeShellTerminalHandleId }),
+	startCodexAccountLoginTerminal: (operationId, terminal) => set({
+		codexAccountLoginTerminal: {
+			operationId,
+			terminal,
+			phase: "running",
+			startedAt: Date.now(),
+		},
+	}),
+	updateCodexAccountLoginTerminal: (handleId, update) => set((state) => {
+		const current = state.codexAccountLoginTerminal;
+		if (!current || current.terminal.handleId !== handleId) return state;
+		return { codexAccountLoginTerminal: { ...current, ...update } };
+	}),
+	clearCodexAccountLoginTerminal: (handleId) => set((state) => {
+		if (handleId && state.codexAccountLoginTerminal?.terminal.handleId !== handleId) return state;
+		return { codexAccountLoginTerminal: null };
+	}),
 	setVisibleTerminalKind: (sessionId, kind) =>
 		set((state) =>
 			state.visibleTerminalKindBySession[sessionId] === kind
