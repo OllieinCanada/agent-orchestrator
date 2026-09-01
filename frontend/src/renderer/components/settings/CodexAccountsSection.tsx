@@ -337,17 +337,17 @@ function CodexAccountDetails({ account, resetCreditSupported, mutationDisabled, 
 	const hasOverall = Boolean(account.capacity.overall?.primary || account.capacity.overall?.secondary);
 	const additionalBuckets = account.capacity.additionalBuckets.filter((bucket) => bucket.primary || bucket.secondary);
 	const usage = account.usageSummary;
-	const hasUsage = Boolean(usage && (usage.latestDayTokens != null || usage.lifetimeTokens != null || usage.peakDailyTokens != null || usage.longestRunningTurnSeconds != null || usage.currentStreakDays != null || usage.longestStreakDays != null));
+	const hasUsage = Boolean(usage && (usage.lifetimeTokens != null || usage.peakDailyTokens != null || usage.longestRunningTurnSeconds != null || usage.currentStreakDays != null || usage.longestStreakDays != null));
 	const resetCredits = account.capacity.resetCredits;
-	const hasDetails = Boolean(plan || hasOverall || additionalBuckets.length > 0 || hasUsage || (resetCredits && resetCredits.availableCount > 0));
+	const hasDetails = Boolean(plan || hasOverall || additionalBuckets.length > 0 || hasUsage || resetCredits);
 	const capacityNotice = capacityNoticeFor(account, t, i18n.language);
 	return (
 		<div className="ml-9 mt-4 space-y-5 pb-1 text-xs">
 			{capacityNotice ? <CapacityNotice {...capacityNotice} /> : null}
-			{plan || hasUsage ? <AccountOverview plan={plan} usage={usage} locale={i18n.language} /> : null}
-			{resetCredits && resetCredits.availableCount > 0 ? (
-				<ResetCreditsRow summary={resetCredits} enabled={resetCreditSupported && !mutationDisabled} busy={resetBusy} locale={i18n.language} onUseReset={onUseReset} />
+			{plan || resetCredits ? (
+				<PlanCard plan={plan} resetCredits={resetCredits} resetEnabled={resetCreditSupported && !mutationDisabled} resetBusy={resetBusy} locale={i18n.language} onUseReset={onUseReset} />
 			) : null}
+			{hasUsage ? <AccountActivity usage={usage} locale={i18n.language} /> : null}
 			{hasOverall && account.capacity.overall ? (
 				<CapacityBucketGroup bucket={account.capacity.overall} title={t("settings.codexAccounts.generalUsageLimits")} locale={i18n.language} />
 			) : null}
@@ -421,15 +421,40 @@ function CapacityWindowRow({ window, label, reached, locale }: { window: Capacit
 	);
 }
 
-function AccountOverview({ plan, usage, locale }: { plan: string | null; usage: UsageSummaryValue | null | undefined; locale: string }) {
+function PlanCard({ plan, resetCredits, resetEnabled, resetBusy, locale, onUseReset }: { plan: string | null; resetCredits: ResetCreditsValue | null | undefined; resetEnabled: boolean; resetBusy: boolean; locale: string; onUseReset: () => void }) {
 	const { t } = useTranslation();
-	const latestDay = usage?.latestDayStartDate ? formatUsageDate(usage.latestDayStartDate, locale) : null;
+	const expiry = formatResetTime(resetCredits?.nearestExpiresAt, locale);
+	return (
+		<section aria-labelledby="codex-account-plan-heading">
+			<h4 id="codex-account-plan-heading" className="mb-2 font-medium text-foreground">{t("settings.codexAccounts.yourPlan")}</h4>
+			<div className="flex flex-wrap items-center justify-between gap-4 rounded-md border border-border/70 bg-muted/15 px-3.5 py-3">
+				{plan ? <p className="text-sm font-medium text-foreground">{plan}</p> : <span />}
+				{resetCredits ? (
+					<div className="flex items-center gap-3">
+						<div className="text-right">
+							<p className="font-medium text-foreground">
+								{resetCredits.availableCount > 0
+									? t("settings.codexAccounts.resetCount", { count: resetCredits.availableCount })
+									: t("settings.codexAccounts.noResetsAvailable")}
+							</p>
+							{expiry ? <p className="mt-0.5 text-muted-foreground" title={expiry.full}>{t("settings.codexAccounts.resetExpires", { value: expiry.visible })}</p> : null}
+						</div>
+						{resetCredits.availableCount > 0 && resetEnabled ? (
+							<Button type="button" size="sm" variant="outline" disabled={resetBusy} onClick={onUseReset}>
+								{resetBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <RotateCcw aria-hidden="true" />}
+								{t("settings.codexAccounts.useReset")}
+							</Button>
+						) : null}
+					</div>
+				) : null}
+			</div>
+		</section>
+	);
+}
+
+function AccountActivity({ usage, locale }: { usage: UsageSummaryValue | null | undefined; locale: string }) {
+	const { t } = useTranslation();
 	const metrics = [
-		plan ? { label: t("settings.codexAccounts.plan"), value: plan } : null,
-		usage?.latestDayTokens == null ? null : {
-			label: latestDay ? t("settings.codexAccounts.tokensOnDate", { date: latestDay }) : t("settings.codexAccounts.latestDayTokens"),
-			value: t("settings.codexAccounts.tokenCount", { value: formatCompactNumber(usage.latestDayTokens, locale) }),
-		},
 		usage?.lifetimeTokens == null ? null : {
 			label: t("settings.codexAccounts.lifetimeTokens"),
 			value: t("settings.codexAccounts.tokenCount", { value: formatCompactNumber(usage.lifetimeTokens, locale) }),
@@ -453,34 +478,21 @@ function AccountOverview({ plan, usage, locale }: { plan: string | null; usage: 
 	].filter((metric): metric is { label: string; value: string } => Boolean(metric));
 	if (metrics.length === 0) return null;
 	return (
-		<section aria-label={t("settings.codexAccounts.accountOverview")}>
-			<div className="flex flex-wrap border-y border-border/70">
-				{metrics.map((metric) => (
-					<div key={metric.label} className="min-w-[8.5rem] flex-1 px-3 py-3 first:pl-0 last:pr-0">
-						<p className="text-sm font-semibold tabular-nums text-foreground">{metric.value}</p>
-						<p className="mt-0.5 whitespace-nowrap text-muted-foreground">{metric.label}</p>
-					</div>
-				))}
-			</div>
-		</section>
-	);
-}
-
-function ResetCreditsRow({ summary, enabled, busy, locale, onUseReset }: { summary: ResetCreditsValue; enabled: boolean; busy: boolean; locale: string; onUseReset: () => void }) {
-	const { t } = useTranslation();
-	const expiry = formatResetTime(summary.nearestExpiresAt, locale);
-	return (
-		<section aria-labelledby="codex-reset-credits-heading">
-			<h4 id="codex-reset-credits-heading" className="mb-2 font-medium text-foreground">{t("settings.codexAccounts.usageLimitResets")}</h4>
-			<div className="flex flex-wrap items-center justify-between gap-3 border-y border-border/70 py-3">
-				<div>
-					<p className="font-medium text-foreground">{t("settings.codexAccounts.resetCount", { count: summary.availableCount })}</p>
-					{expiry ? <p className="mt-0.5 text-muted-foreground" title={expiry.full}>{t("settings.codexAccounts.resetExpires", { value: expiry.visible })}</p> : null}
+		<section aria-labelledby="codex-account-activity-heading">
+			<h4 id="codex-account-activity-heading" className="mb-2 font-medium text-foreground">{t("settings.codexAccounts.activity")}</h4>
+			<div className="overflow-x-auto rounded-md border border-border/70 bg-muted/15">
+				<div
+					data-testid="codex-account-activity-metrics"
+					className="grid divide-x divide-border/70"
+					style={{ gridTemplateColumns: `repeat(${metrics.length}, minmax(8.5rem, 1fr))`, minWidth: `${metrics.length * 8.5}rem` }}
+				>
+					{metrics.map((metric) => (
+						<div key={metric.label} className="px-4 py-3 text-center">
+							<p className="text-sm font-semibold tabular-nums text-foreground">{metric.value}</p>
+							<p className="mt-0.5 whitespace-nowrap text-muted-foreground">{metric.label}</p>
+						</div>
+					))}
 				</div>
-				<Button type="button" size="sm" variant="outline" disabled={!enabled || busy} onClick={onUseReset}>
-					{busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <RotateCcw aria-hidden="true" />}
-					{t("settings.codexAccounts.useReset")}
-				</Button>
 			</div>
 		</section>
 	);
@@ -560,12 +572,6 @@ function formatObservedTime(value: string, locale: string): string {
 	const date = new Date(value);
 	if (Number.isNaN(date.getTime())) return "";
 	return new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(date);
-}
-
-function formatUsageDate(value: string, locale: string): string | null {
-	const date = new Date(`${value}T00:00:00`);
-	if (Number.isNaN(date.getTime())) return null;
-	return new Intl.DateTimeFormat(locale, { day: "numeric", month: "short" }).format(date);
 }
 
 function formatCompactNumber(value: number, locale: string): string {

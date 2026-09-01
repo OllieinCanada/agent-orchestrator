@@ -133,8 +133,8 @@ it("presents plan, general and model usage limits with remaining-capacity meters
 	await screen.findAllByText(/81% remaining/);
 	fireEvent.click(container.querySelector(`[data-account-id="${activeAccount.id}"] button`) as HTMLButtonElement);
 
-	expect(screen.queryByText("Your plan")).not.toBeInTheDocument();
-	expect(await screen.findByRole("region", { name: "Account overview" })).toBeInTheDocument();
+	expect(await screen.findByRole("region", { name: "Your plan" })).toBeInTheDocument();
+	expect(screen.getByRole("region", { name: "Activity" })).toBeInTheDocument();
 	expect(screen.getByText("Pro plan")).toBeInTheDocument();
 	expect(screen.getByText("General usage limits")).toBeInTheDocument();
 	expect(screen.getAllByText("Weekly usage limit")).toHaveLength(2);
@@ -142,12 +142,13 @@ it("presents plan, general and model usage limits with remaining-capacity meters
 	expect(screen.getByText("5-hour usage limit")).toBeInTheDocument();
 	const weeklyMeter = screen.getByRole("progressbar", { name: /Weekly usage limit, 81% left/ });
 	expect(weeklyMeter).toHaveAttribute("aria-valuenow", "81");
-	expect(screen.getByText("34.9M tokens")).toBeInTheDocument();
+	expect(screen.queryByText("34.9M tokens")).not.toBeInTheDocument();
 	expect(screen.getByText("54.6B tokens")).toBeInTheDocument();
 	expect(screen.getByText("2B tokens")).toBeInTheDocument();
 	expect(screen.getByText("7h 19m")).toBeInTheDocument();
 	expect(screen.getByText("2 days")).toBeInTheDocument();
 	expect(screen.getByText("99 days")).toBeInTheDocument();
+	expect(screen.getByTestId("codex-account-activity-metrics").children).toHaveLength(5);
 	expect(screen.queryByText("19% used")).not.toBeInTheDocument();
 	expect(screen.queryByText("54571452296")).not.toBeInTheDocument();
 });
@@ -184,7 +185,7 @@ it("shows provider-reported resets and confirms before consuming one", async () 
 		"/api/v1/agents/codex/accounts/{accountId}/reset-credit/consume",
 		{ params: { path: { accountId: activeAccount.id } }, body: { idempotencyKey: "reset-request-1" } },
 	));
-	await waitFor(() => expect(screen.queryByText("1 reset available")).not.toBeInTheDocument());
+	await waitFor(() => expect(screen.getByText("No resets available")).toBeInTheDocument());
 	vi.unstubAllGlobals();
 });
 
