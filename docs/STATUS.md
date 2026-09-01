@@ -95,6 +95,13 @@ surface (`npm run sqlc`, `npm run api`).
   installation/authentication observations, purpose-specific freshness,
   single-flight checks, bounded warm-up/retries, launch-time validation, and
   compatibility projections for older agent inventory/probe clients.
+- Codex account management under Settings → Agents. AO reconciles the current
+  device-global Codex identity, adds file-backed accounts through an inline
+  native login terminal, and shows structured authentication, capacity, and
+  usage facts without parsing credentials. A manual global switch atomically
+  changes the normal device Codex credential, then stops and resumes only the
+  running AO-owned sessions with the same native thread IDs. Native histories
+  remain in the normal Codex home; external Codex clients are not controlled.
 - OpenAPI spec generated from Go DTOs; frontend TS types generated from it and
   drift-checked in CI.
 

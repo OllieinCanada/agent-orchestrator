@@ -3,10 +3,10 @@ title: Codex
 description: Built-in Terminal UI and native app-server Chat support for the user's Codex installation.
 ---
 
-AO uses the locally installed `codex` executable and its existing OpenAI authentication.
+AO uses the locally installed `codex` executable and Codex-owned authentication.
 
 ```bash
-ao agent ls --refresh
+ao agent ls
 ao spawn --project my-app --name codex-task --agent codex --mode chat
 ```
 
@@ -18,3 +18,11 @@ ao spawn --project my-app --name codex-task --agent codex --mode chat
 Codex supports the same capability-gated Chat/Terminal UI handoff as Claude Code. The AO session and worktree remain stable across a compatible handoff.
 
 AO performs bounded installation and authentication probes before spawn. Use `--skip-agent-check` only to bypass that advisory CLI preflight; daemon validation remains authoritative.
+
+## Accounts
+
+Codex account management is being validated behind AO's development gate. When enabled, open **Settings → Agents → Codex** to import the current device account once or add another account through Codex's native login terminal. AO derives the card label from the verified account, so there is no name prompt. Supported Codex builds can also provide plan, remaining-capacity, reset, and usage details.
+
+Exactly one account is active for all AO-owned Codex processes. AO stores inactive Codex-owned credential files in private account slots and leases the selected credential into one shared AO Codex runtime. A manual switch stops affected Codex controllers at a safe boundary and resumes the same AO sessions, worktrees, interface modes, and native thread IDs. It does not create a continuation task or copy native history between accounts.
+
+AO never parses or exposes `auth.json`, does not continuously modify the external device Codex home, and does not scrape billing information. Account deletion, rename, logout, per-task selection, assisted switching, and automatic switching are not part of this release.
