@@ -196,6 +196,15 @@ describe("normalizeApiOperation", () => {
 		expect(normalizeApiOperation("POST", "/api/v1/agents/codex/models/refresh")).toBe(
 			"POST /api/v1/agents/:id/models/refresh",
 		);
+		expect(normalizeApiOperation("POST", "/api/v1/agents/codex/accounts/login-operations/72d4db6e-da2c-414c-a6a9-fdbd09a006b6/verify")).toBe(
+			"POST /api/v1/agents/codex/accounts/login-operations/:id/verify",
+		);
+		expect(normalizeApiOperation("POST", "/api/v1/agents/codex/account-switches/switch-1/recover")).toBe(
+			"POST /api/v1/agents/codex/account-switches/:id/recover",
+		);
+		expect(normalizeApiOperation("GET", "/api/v1/agents/codex/account-switches/switch-1")).toBe(
+			"GET /api/v1/agents/codex/account-switches/:id",
+		);
 	});
 
 	it("leaves collection and non-resource paths untouched", () => {
