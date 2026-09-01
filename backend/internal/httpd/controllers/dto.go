@@ -37,6 +37,16 @@ type AgentIDParam struct {
 	Agent string `path:"agent" description:"Agent adapter identifier."`
 }
 
+// CodexAccountIDParam documents a Codex account route identifier.
+type CodexAccountIDParam struct {
+	AccountID string `path:"accountId" description:"AO Codex account identifier."`
+}
+
+// CodexAccountLoginIDParam documents a Codex login operation route identifier.
+type CodexAccountLoginIDParam struct {
+	OperationID string `path:"operationId" description:"In-memory Codex account login operation identifier."`
+}
+
 // ListProjectsResponse is the body of GET /api/v1/projects.
 type ListProjectsResponse struct {
 	Projects []projectsvc.Summary `json:"projects"`
@@ -1048,6 +1058,43 @@ type AgentReadinessResponse = agentsvc.Readiness
 type EnsureAgentReadinessRequest struct {
 	AgentIDs []string                     `json:"agentIds,omitempty"`
 	Purpose  domain.AgentReadinessPurpose `json:"purpose" enum:"display,launch"`
+}
+
+// CodexAccountsResponse is the cached account and capability view.
+type CodexAccountsResponse = agentsvc.CodexAccounts
+
+// EnsureCodexAccountsRequest selects accounts for display reads.
+type EnsureCodexAccountsRequest struct {
+	AccountIDs   []string `json:"accountIds,omitempty"`
+	IncludeUsage bool     `json:"includeUsage,omitempty"`
+}
+
+// OpenCodexAccountLoginTerminalResponse is the standalone terminal opened for
+// one pending account's native Codex login flow.
+type OpenCodexAccountLoginTerminalResponse struct {
+	Operation     domain.CodexAccountLoginOperation `json:"operation"`
+	ShellTerminal CodexAccountLoginTerminalResponse `json:"shellTerminal"`
+}
+
+// CodexAccountLoginTerminalResponse contains only the mux identity and display
+// fields needed by the inline Settings terminal. Its private credential-home
+// working directory is deliberately excluded from the public API.
+type CodexAccountLoginTerminalResponse struct {
+	HandleID  string    `json:"handleId"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// StartCodexAccountSwitchRequest requests an idempotent global account change.
+type StartCodexAccountSwitchRequest struct {
+	TargetAccountID         string `json:"targetAccountId" minLength:"1"`
+	ExpectedAccountRevision int64  `json:"expectedAccountRevision" minimum:"0"`
+	IdempotencyKey          string `json:"idempotencyKey" minLength:"1"`
+}
+
+// CodexAccountSwitchIDParam describes the durable switch path parameter.
+type CodexAccountSwitchIDParam struct {
+	SwitchID string `path:"switchId" description:"Durable Codex account switch identifier."`
 }
 
 // AgentReadinessSnapshot is one normalized harness readiness view.

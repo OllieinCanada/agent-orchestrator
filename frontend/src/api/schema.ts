@@ -72,6 +72,210 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/codex/account-switches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a global AO Codex account switch */
+        post: operations["startCodexAccountSwitch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/codex/account-switches/{switchId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one global AO Codex account switch */
+        get: operations["getCodexAccountSwitch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/codex/account-switches/{switchId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a global Codex account switch before session shutdown */
+        post: operations["cancelCodexAccountSwitch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/codex/account-switches/{switchId}/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry incomplete restarts for one Codex account switch */
+        post: operations["recoverCodexAccountSwitch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/codex/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return cached AO Codex accounts and active-account state */
+        get: operations["getCodexAccounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/codex/accounts/ensure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discover Codex accounts and ensure authentication, capacity, and optional usage */
+        post: operations["ensureCodexAccounts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/codex/accounts/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stream cached and live Codex account state */
+        get: operations["streamCodexAccounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/codex/accounts/login-operations/{operationId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel one native Codex account login operation */
+        post: operations["cancelCodexAccountLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/codex/accounts/login-operations/{operationId}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify one native Codex account login operation */
+        post: operations["verifyCodexAccountLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/codex/accounts/login-terminal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Open an inline native login terminal for a new AO Codex account */
+        post: operations["openCodexAccountLoginTerminal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return cached normalized agent readiness without running native checks */
+        get: operations["getAgentReadiness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/readiness/ensure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ensure normalized readiness for selected agent adapters */
+        post: operations["ensureAgentReadiness"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/refresh": {
         parameters: {
             query?: never;
@@ -1869,6 +2073,18 @@ export interface components {
             path: string;
             projectId?: null | string;
         };
+        AgentAuthenticationObservation: {
+            /** Format: date-time */
+            attemptedAt: null | string;
+            /** Format: date-time */
+            checkedAt: null | string;
+            /** @enum {string} */
+            freshness: "fresh" | "stale" | "checking";
+            reason: string;
+            reasonCode: string;
+            /** @enum {string} */
+            state: "authorized" | "unauthorized" | "unknown" | "not_applicable";
+        };
         AgentConfig: {
             mode?: string;
             model?: string;
@@ -1889,6 +2105,18 @@ export interface components {
             lastUsedAt?: null | string;
             /** @description Number of retained sessions currently attributed to this agent. */
             usageCount?: number;
+        };
+        AgentInstallationObservation: {
+            /** Format: date-time */
+            attemptedAt: null | string;
+            /** Format: date-time */
+            checkedAt: null | string;
+            /** @enum {string} */
+            freshness: "fresh" | "stale" | "checking";
+            reason: string;
+            reasonCode: string;
+            /** @enum {string} */
+            state: "installed" | "not_installed" | "unknown";
         };
         AgentModelInfo: {
             id: string;
@@ -1911,6 +2139,20 @@ export interface components {
             /** Format: date-time */
             validatedAt?: string;
             warning?: string;
+        };
+        AgentReadinessResponse: {
+            agents: components["schemas"]["AgentReadinessSnapshot"][];
+        };
+        AgentReadinessSnapshot: {
+            authentication: components["schemas"]["AgentAuthenticationObservation"];
+            /** @enum {string} */
+            effectiveReadiness: "ready" | "not_ready" | "unknown";
+            id: string;
+            installation: components["schemas"]["AgentInstallationObservation"];
+            label: string;
+            /** Format: date-time */
+            lastUsedAt?: null | string;
+            usageCount: number;
         };
         AgentSwitch: {
             /** @enum {string} */
@@ -1994,6 +2236,151 @@ export interface components {
             name?: null | string;
             projectId?: null | string;
             remoteUrl: string;
+        };
+        CodexAccountCapabilities: {
+            accountManagement: components["schemas"]["CodexCapabilityObservation"];
+            accountRead: components["schemas"]["CodexCapabilityObservation"];
+            capacityRead: components["schemas"]["CodexCapabilityObservation"];
+            globalSwitch: components["schemas"]["CodexCapabilityObservation"];
+            nativeLogin: components["schemas"]["CodexCapabilityObservation"];
+            threadResume: components["schemas"]["CodexCapabilityObservation"];
+            usageRead: components["schemas"]["CodexCapabilityObservation"];
+        };
+        CodexAccountLoginOperation: {
+            account?: components["schemas"]["CodexAccountSnapshot"];
+            /** Format: date-time */
+            expiresAt: string;
+            operationId: string;
+            reason: string;
+            reasonCode: string;
+            /** @enum {string} */
+            status: "pending" | "verifying" | "unauthorized" | "unverified" | "completed" | "cancelled" | "failed" | "expired";
+        };
+        CodexAccountLoginTerminalResponse: {
+            /** Format: date-time */
+            createdAt: string;
+            handleId: string;
+            title: string;
+        };
+        CodexAccountSnapshot: {
+            accountEmail?: null | string;
+            active: boolean;
+            /** @enum {string} */
+            authMethod: "chatgpt" | "api_key" | "other" | "unknown";
+            authentication: components["schemas"]["AgentAuthenticationObservation"];
+            capacity: components["schemas"]["CodexCapacitySnapshot"];
+            /** Format: date-time */
+            createdAt: string;
+            id: string;
+            label: string;
+            reason: string;
+            reasonCode: string;
+            /** @enum {string} */
+            source: "managed";
+            /** @enum {string} */
+            status: "valid" | "broken";
+            usageSummary?: components["schemas"]["CodexAccountUsageSummary"];
+        };
+        CodexAccountSwitch: {
+            canCancel: boolean;
+            canRecover: boolean;
+            /** Format: date-time */
+            cancellationRequestedAt?: null | string;
+            /** Format: date-time */
+            completedAt?: null | string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            credentialsCommittedAt?: null | string;
+            failureCode?: string;
+            id: string;
+            phase: string;
+            reason: string;
+            sessions: components["schemas"]["CodexAccountSwitchSession"][];
+            sourceAccountId: string;
+            targetAccountId: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CodexAccountSwitchSession: {
+            errorCode?: string;
+            /** @enum {string} */
+            interfaceMode: "tui" | "chat";
+            restartState: string;
+            /** Format: date-time */
+            restartedAt?: null | string;
+            sessionId: string;
+            stopState: string;
+            /** Format: date-time */
+            stoppedAt?: null | string;
+            wasRunning: boolean;
+        };
+        CodexAccountUsageSummary: {
+            currentStreakDays?: null | number;
+            latestDayStartDate?: null | string;
+            latestDayTokens?: null | number;
+            lifetimeTokens?: null | number;
+            /** Format: date-time */
+            observedAt: string;
+        };
+        CodexAccountsResponse: {
+            /** Format: int64 */
+            accountRevision: number;
+            accounts: components["schemas"]["CodexAccountSnapshot"][];
+            activeAccountId?: string;
+            capabilities: components["schemas"]["CodexAccountCapabilities"];
+            currentSwitch?: components["schemas"]["CodexAccountSwitch"];
+            unmanagedGlobalAccount?: components["schemas"]["CodexUnmanagedGlobalAccount"];
+        };
+        CodexCapabilityObservation: {
+            reason: string;
+            reasonCode: string;
+            /** @enum {string} */
+            state: "supported" | "unsupported" | "unknown";
+        };
+        CodexCapacityBucket: {
+            displayName?: null | string;
+            limitId: string;
+            primary?: components["schemas"]["CodexCapacityWindow"];
+            /** @enum {string} */
+            reached: "not_reached" | "reached" | "unknown";
+            secondary?: components["schemas"]["CodexCapacityWindow"];
+        };
+        CodexCapacitySnapshot: {
+            additionalBuckets: components["schemas"]["CodexCapacityBucket"][];
+            /** Format: date-time */
+            attemptedAt?: null | string;
+            /** Format: date-time */
+            checkedAt?: null | string;
+            /** @enum {string} */
+            freshness: "fresh" | "stale" | "checking";
+            /** Format: date-time */
+            observedAt?: null | string;
+            overall?: components["schemas"]["CodexCapacityBucket"];
+            plan?: null | string;
+            reason: string;
+            reasonCode: string;
+            remainingPercent?: null | number;
+            /** Format: date-time */
+            resetsAt?: null | string;
+            /** @enum {string} */
+            state: "available" | "near_limit" | "exhausted" | "unknown" | "unsupported";
+            usedPercent?: null | number;
+        };
+        CodexCapacityWindow: {
+            /** Format: date-time */
+            resetsAt?: null | string;
+            /** Format: double */
+            usedPercent: number;
+            windowDurationMinutes?: null | number;
+        };
+        CodexUnmanagedGlobalAccount: {
+            accountEmail?: null | string;
+            authMethod: string;
+            label: string;
+            reason: string;
+            reasonCode: string;
+            requiresLogin: boolean;
         };
         CompactConversationResponse: {
             /** Format: int64 */
@@ -2410,6 +2797,15 @@ export interface components {
         EditQueuedConversationMessageRequest: {
             text: string;
         };
+        EnsureAgentReadinessRequest: {
+            agentIds?: string[];
+            /** @enum {string} */
+            purpose: "display" | "launch";
+        };
+        EnsureCodexAccountsRequest: {
+            accountIds?: string[];
+            includeUsage?: boolean;
+        };
         EstimatedCostResponse: {
             /** Format: int64 */
             cachedInputNanos: null | number;
@@ -2633,6 +3029,10 @@ export interface components {
             kind: "session" | "pr";
             prUrl?: string;
             sessionId: string;
+        };
+        OpenCodexAccountLoginTerminalResponse: {
+            operation: components["schemas"]["CodexAccountLoginOperation"];
+            shellTerminal: components["schemas"]["CodexAccountLoginTerminalResponse"];
         };
         OpenShellTerminalRequest: {
             /** @description Project whose root the shell starts in. Omitted opens the shell in the daemon data dir. */
@@ -3174,6 +3574,12 @@ export interface components {
             paths: string[];
             sessionId: string;
         };
+        StartCodexAccountSwitchRequest: {
+            /** Format: int64 */
+            expectedAccountRevision: number;
+            idempotencyKey: string;
+            targetAccountId: string;
+        };
         StartPreviewServerRequest: {
             /** @description Named preview configuration. Optional when exactly one configuration exists. */
             configuration?: string;
@@ -3586,6 +3992,516 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProbeAgentResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    startCodexAccountSwitch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartCodexAccountSwitchRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexAccountSwitch"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getCodexAccountSwitch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Durable Codex account switch identifier. */
+                switchId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexAccountSwitch"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    cancelCodexAccountSwitch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Durable Codex account switch identifier. */
+                switchId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexAccountSwitch"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    recoverCodexAccountSwitch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Durable Codex account switch identifier. */
+                switchId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexAccountSwitch"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getCodexAccounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexAccountsResponse"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    ensureCodexAccounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnsureCodexAccountsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexAccountsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    streamCodexAccounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["CodexAccountsResponse"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    cancelCodexAccountLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description In-memory Codex account login operation identifier. */
+                operationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexAccountLoginOperation"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    verifyCodexAccountLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description In-memory Codex account login operation identifier. */
+                operationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexAccountLoginOperation"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    openCodexAccountLoginTerminal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenCodexAccountLoginTerminalResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getAgentReadiness: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentReadinessResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    ensureAgentReadiness: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnsureAgentReadinessRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentReadinessResponse"];
                 };
             };
             /** @description Bad Request */

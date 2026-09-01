@@ -15,6 +15,7 @@ import (
 	openapi "github.com/swaggest/openapi-go"
 	"github.com/swaggest/openapi-go/openapi31"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
@@ -207,6 +208,8 @@ var schemaNames = map[string]string{
 	"ControllersListProjectsResponse":                     "ListProjectsResponse",
 	"ControllersProjectResponse":                          "ProjectResponse",
 	"ControllersAgentIDParam":                             "AgentIDParam",
+	"ControllersCodexAccountIDParam":                      "CodexAccountIDParam",
+	"ControllersCodexAccountLoginIDParam":                 "CodexAccountLoginIDParam",
 	"ControllersGetProjectResponse":                       "ProjectGetResponse",
 	"ControllersProjectOrDegraded":                        "ProjectOrDegraded",
 	"ControllersListSessionsQuery":                        "ListSessionsQuery",
@@ -257,6 +260,22 @@ var schemaNames = map[string]string{
 	"ControllersWorkspaceFileSections":                    "WorkspaceFileSections",
 	"ControllersWorkspaceCommitSummary":                   "WorkspaceCommitSummary",
 	"ControllersWorkspaceSummary":                         "WorkspaceSummary",
+	"ControllersEnsureCodexAccountsRequest":               "EnsureCodexAccountsRequest",
+	"AgentCodexAccounts":                                  "CodexAccountsResponse",
+	"DomainCodexAccountSnapshot":                          "CodexAccountSnapshot",
+	"DomainCodexAccountUsageSummary":                      "CodexAccountUsageSummary",
+	"DomainCodexUnmanagedGlobalAccount":                   "CodexUnmanagedGlobalAccount",
+	"DomainCodexAccountCapabilities":                      "CodexAccountCapabilities",
+	"DomainCodexCapabilityObservation":                    "CodexCapabilityObservation",
+	"DomainCodexAccountLoginOperation":                    "CodexAccountLoginOperation",
+	"DomainCodexAccountSwitch":                            "CodexAccountSwitch",
+	"DomainCodexAccountSwitchSession":                     "CodexAccountSwitchSession",
+	"ControllersStartCodexAccountSwitchRequest":           "StartCodexAccountSwitchRequest",
+	"ControllersCodexAccountSwitchIDParam":                "CodexAccountSwitchIDParam",
+	"DomainCodexCapacitySnapshot":                         "CodexCapacitySnapshot",
+	"DomainCodexCapacitySummary":                          "CodexCapacitySummary",
+	"DomainCodexCapacityBucket":                           "CodexCapacityBucket",
+	"DomainCodexCapacityWindow":                           "CodexCapacityWindow",
 	"ControllersWorkspaceFileResponse":                    "WorkspaceFileResponse",
 	"ControllersWorkspaceTreeQuery":                       "WorkspaceTreeQuery",
 	"ControllersListWorkspaceTreeResponse":                "ListWorkspaceTreeResponse",
@@ -331,12 +350,14 @@ var schemaNames = map[string]string{
 	"ControllersUsageHarnessResponse":             "UsageHarnessResponse",
 	"ControllersSessionUsageResponse":             "SessionUsageResponse",
 	// httpd/controllers — standalone shell terminal wire envelopes
-	"ControllersShellTerminalHandleIDParam": "ShellTerminalHandleIDParam",
-	"ControllersOpenShellTerminalRequest":   "OpenShellTerminalRequest",
-	"ControllersUpdateShellTerminalRequest": "UpdateShellTerminalRequest",
-	"ControllersShellTerminalResponse":      "ShellTerminalResponse",
-	"ControllersListShellTerminalsResponse": "ListShellTerminalsResponse",
-	"ControllersShellTerminalEnvelope":      "ShellTerminalEnvelope",
+	"ControllersShellTerminalHandleIDParam":            "ShellTerminalHandleIDParam",
+	"ControllersOpenShellTerminalRequest":              "OpenShellTerminalRequest",
+	"ControllersUpdateShellTerminalRequest":            "UpdateShellTerminalRequest",
+	"ControllersShellTerminalResponse":                 "ShellTerminalResponse",
+	"ControllersListShellTerminalsResponse":            "ListShellTerminalsResponse",
+	"ControllersShellTerminalEnvelope":                 "ShellTerminalEnvelope",
+	"ControllersOpenCodexAccountLoginTerminalResponse": "OpenCodexAccountLoginTerminalResponse",
+	"ControllersCodexAccountLoginTerminalResponse":     "CodexAccountLoginTerminalResponse",
 	// httpd/controllers — PR wire envelopes
 	"ControllersMergePRRequest":          "MergePRRequest",
 	"ControllersMergePRResponse":         "MergePRResponse",
@@ -990,6 +1011,58 @@ func agentOperations() []operation {
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/agents/codex/accounts", id: "getCodexAccounts", tag: "agents",
+			summary: "Return cached AO Codex accounts and active-account state",
+			resps:   []respUnit{{http.StatusOK, controllers.CodexAccountsResponse{}}, {http.StatusServiceUnavailable, envelope.APIError{}}, {http.StatusNotImplemented, envelope.APIError{}}},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/agents/codex/accounts/ensure", id: "ensureCodexAccounts", tag: "agents",
+			summary: "Discover Codex accounts and ensure authentication, capacity, and optional usage",
+			reqBody: controllers.EnsureCodexAccountsRequest{},
+			resps:   []respUnit{{http.StatusOK, controllers.CodexAccountsResponse{}}, {http.StatusBadRequest, envelope.APIError{}}, {http.StatusServiceUnavailable, envelope.APIError{}}, {http.StatusNotImplemented, envelope.APIError{}}},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/agents/codex/accounts/login-terminal", id: "openCodexAccountLoginTerminal", tag: "agents",
+			summary: "Open an inline native login terminal for a new AO Codex account",
+			resps:   []respUnit{{http.StatusAccepted, controllers.OpenCodexAccountLoginTerminalResponse{}}, {http.StatusConflict, envelope.APIError{}}, {http.StatusServiceUnavailable, envelope.APIError{}}, {http.StatusNotImplemented, envelope.APIError{}}},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/agents/codex/accounts/login-operations/{operationId}/verify", id: "verifyCodexAccountLogin", tag: "agents",
+			summary: "Verify one native Codex account login operation", pathParams: []any{controllers.CodexAccountLoginIDParam{}},
+			resps: []respUnit{{http.StatusOK, domain.CodexAccountLoginOperation{}}, {http.StatusNotFound, envelope.APIError{}}, {http.StatusServiceUnavailable, envelope.APIError{}}},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/agents/codex/accounts/login-operations/{operationId}/cancel", id: "cancelCodexAccountLogin", tag: "agents",
+			summary: "Cancel one native Codex account login operation", pathParams: []any{controllers.CodexAccountLoginIDParam{}},
+			resps: []respUnit{{http.StatusOK, domain.CodexAccountLoginOperation{}}, {http.StatusNotFound, envelope.APIError{}}, {http.StatusServiceUnavailable, envelope.APIError{}}},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/agents/codex/accounts/events", id: "streamCodexAccounts", tag: "agents",
+			summary:      "Stream cached and live Codex account state",
+			resps:        []respUnit{{http.StatusOK, controllers.CodexAccountsResponse{}}, {http.StatusServiceUnavailable, envelope.APIError{}}, {http.StatusNotImplemented, envelope.APIError{}}},
+			contentTypes: map[int]string{http.StatusOK: "text/event-stream"},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/agents/codex/account-switches", id: "startCodexAccountSwitch", tag: "agents",
+			summary: "Start a global AO Codex account switch", reqBody: controllers.StartCodexAccountSwitchRequest{},
+			resps: []respUnit{{http.StatusAccepted, domain.CodexAccountSwitch{}}, {http.StatusBadRequest, envelope.APIError{}}, {http.StatusConflict, envelope.APIError{}}, {http.StatusServiceUnavailable, envelope.APIError{}}},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/agents/codex/account-switches/{switchId}", id: "getCodexAccountSwitch", tag: "agents",
+			summary: "Read one global AO Codex account switch", pathParams: []any{controllers.CodexAccountSwitchIDParam{}},
+			resps: []respUnit{{http.StatusOK, domain.CodexAccountSwitch{}}, {http.StatusNotFound, envelope.APIError{}}},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/agents/codex/account-switches/{switchId}/cancel", id: "cancelCodexAccountSwitch", tag: "agents",
+			summary: "Cancel a global Codex account switch before session shutdown", pathParams: []any{controllers.CodexAccountSwitchIDParam{}},
+			resps: []respUnit{{http.StatusOK, domain.CodexAccountSwitch{}}, {http.StatusNotFound, envelope.APIError{}}, {http.StatusConflict, envelope.APIError{}}},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/agents/codex/account-switches/{switchId}/recover", id: "recoverCodexAccountSwitch", tag: "agents",
+			summary: "Retry incomplete restarts for one Codex account switch", pathParams: []any{controllers.CodexAccountSwitchIDParam{}},
+			resps: []respUnit{{http.StatusOK, domain.CodexAccountSwitch{}}, {http.StatusNotFound, envelope.APIError{}}, {http.StatusConflict, envelope.APIError{}}},
 		},
 		{
 			method: http.MethodPost, path: "/api/v1/agents/refresh", id: "refreshAgents", tag: "agents",
