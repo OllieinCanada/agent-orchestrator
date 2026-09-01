@@ -19,24 +19,6 @@ const (
 	CodexAccountStatusBroken CodexAccountStatus = "broken"
 )
 
-// CodexAccount is the durable, display-safe identity AO assigns to one opaque
-// Codex credential slot. Provider email is metadata, not identity, so two
-// accounts may legitimately have the same email address.
-type CodexAccount struct {
-	ID         string             `json:"id"`
-	Source     CodexAccountSource `json:"source" enum:"managed"`
-	AuthMethod CodexAuthMethod    `json:"authMethod" enum:"chatgpt,api_key,other,unknown"`
-	Email      *string            `json:"email,omitempty"`
-	CreatedAt  time.Time          `json:"createdAt"`
-	VerifiedAt time.Time          `json:"verifiedAt"`
-}
-
-// CodexAccountAuthentication is the normalized authentication observation for an account.
-type CodexAccountAuthentication = AgentAuthenticationObservation
-
-// CodexAccountCapacity is the normalized provider capacity observation for an account.
-type CodexAccountCapacity = CodexCapacitySnapshot
-
 // CodexAuthMethod identifies the provider authentication mechanism.
 type CodexAuthMethod string
 
@@ -187,10 +169,9 @@ type CodexActiveAccount struct {
 // CodexUnmanagedGlobalAccount describes a device-global identity that AO cannot
 // safely import or switch because its credential is unavailable or ambiguous.
 type CodexUnmanagedGlobalAccount struct {
-	Label         string          `json:"label"`
-	AuthMethod    CodexAuthMethod `json:"authMethod"`
-	AccountEmail  *string         `json:"accountEmail,omitempty"`
-	RequiresLogin bool            `json:"requiresLogin"`
-	ReasonCode    string          `json:"reasonCode"`
-	Reason        string          `json:"reason"`
+	Label        string          `json:"label"`
+	AuthMethod   CodexAuthMethod `json:"authMethod"`
+	AccountEmail *string         `json:"accountEmail,omitempty"`
+	ReasonCode   string          `json:"reasonCode"`
+	Reason       string          `json:"reason"`
 }

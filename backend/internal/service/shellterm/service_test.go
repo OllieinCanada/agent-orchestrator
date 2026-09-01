@@ -261,8 +261,8 @@ func TestOpenCommandTerminalUsesTrustedProcessConfiguration(t *testing.T) {
 
 	term, err := svc.OpenCommandTerminal(context.Background(), OpenCommandTerminalInput{
 		Argv:       []string{"/Applications/AO.app/Contents/MacOS/ao", "codex-login"},
-		Env:        map[string]string{"CODEX_HOME": "/data/codex-profiles/work/home"},
-		WorkingDir: "/data/codex-profiles/work/home",
+		Env:        map[string]string{"CODEX_HOME": "/data/codex-accounts/work/home"},
+		WorkingDir: "/data/codex-accounts/work/home",
 		Title:      "Codex login - Work",
 	})
 	if err != nil {
@@ -276,16 +276,16 @@ func TestOpenCommandTerminalUsesTrustedProcessConfiguration(t *testing.T) {
 	if got, want := created.Argv, []string{"/Applications/AO.app/Contents/MacOS/ao", "codex-login"}; !slices.Equal(got, want) {
 		t.Errorf("argv = %q, want %q", got, want)
 	}
-	if got := created.Env["CODEX_HOME"]; got != "/data/codex-profiles/work/home" {
-		t.Errorf("CODEX_HOME = %q, want the selected profile home", got)
+	if got := created.Env["CODEX_HOME"]; got != "/data/codex-accounts/work/home" {
+		t.Errorf("CODEX_HOME = %q, want the selected account home", got)
 	}
-	if created.WorkspacePath != "/data/codex-profiles/work/home" {
-		t.Errorf("workspace path = %q, want the selected profile home", created.WorkspacePath)
+	if created.WorkspacePath != "/data/codex-accounts/work/home" {
+		t.Errorf("workspace path = %q, want the selected account home", created.WorkspacePath)
 	}
 	if !created.ExitOnCommandCompletion {
 		t.Error("backend-owned command terminal must exit when its command completes")
 	}
-	if term.Title != "Codex login - Work" || term.WorkingDir != "/data/codex-profiles/work/home" {
+	if term.Title != "Codex login - Work" || term.WorkingDir != "/data/codex-accounts/work/home" {
 		t.Errorf("terminal = %+v, want trusted title and working directory", term)
 	}
 	if len(st.records) != 1 || st.records[0].Title != "Codex login - Work" {
@@ -300,7 +300,7 @@ func TestOpenCommandTerminalDestroysRuntimeWhenPersistenceFails(t *testing.T) {
 
 	_, err := svc.OpenCommandTerminal(context.Background(), OpenCommandTerminalInput{
 		Argv:       []string{"/ao", "codex-login"},
-		WorkingDir: "/data/codex-profiles/work/home",
+		WorkingDir: "/data/codex-accounts/work/home",
 		Title:      "Codex login - Work",
 	})
 	if err == nil {

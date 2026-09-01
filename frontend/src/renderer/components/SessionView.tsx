@@ -41,7 +41,7 @@ import { SessionTopbarHost } from "./SessionTopbarPortal";
 import { TerminalSwitchAgentButton } from "./TerminalSwitchAgentButton";
 import { TopbarButton } from "./TopbarButton";
 import { useBrowserView } from "../hooks/useBrowserView";
-import { useCodexAccountsQuery } from "../hooks/useCodexProfilesQuery";
+import { useCodexAccountsQuery } from "../hooks/useCodexAccountsQuery";
 import { useFileAnnotation } from "../hooks/useFileAnnotation";
 import { useResizable } from "../hooks/useResizable";
 import {

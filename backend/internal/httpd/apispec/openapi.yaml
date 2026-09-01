@@ -6888,12 +6888,9 @@ components:
           type: string
         reasonCode:
           type: string
-        requiresLogin:
-          type: boolean
       required:
       - label
       - authMethod
-      - requiresLogin
       - reasonCode
       - reason
       type: object

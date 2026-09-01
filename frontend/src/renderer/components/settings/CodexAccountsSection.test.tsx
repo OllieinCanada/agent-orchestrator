@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { useUiStore } from "../../stores/ui-store";
-import { CodexAccountsSection } from "./CodexProfilesSection";
+import { CodexAccountsSection } from "./CodexAccountsSection";
 
 const { getMock, postMock, scrollIntoViewMock, terminalStateCallback } = vi.hoisted(() => ({
 	getMock: vi.fn(),

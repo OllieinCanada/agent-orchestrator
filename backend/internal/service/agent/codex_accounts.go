@@ -1210,7 +1210,7 @@ func (m *codexAccountManager) verifyOpaqueGlobalCredential(credential []byte) (p
 
 func (m *codexAccountManager) setUnmanagedGlobal(label string, method domain.CodexAuthMethod, email *string, code, reason string) {
 	m.mu.Lock()
-	m.unmanaged = &domain.CodexUnmanagedGlobalAccount{Label: label, AuthMethod: method, AccountEmail: email, RequiresLogin: false, ReasonCode: code, Reason: reason}
+	m.unmanaged = &domain.CodexUnmanagedGlobalAccount{Label: label, AuthMethod: method, AccountEmail: email, ReasonCode: code, Reason: reason}
 	m.mu.Unlock()
 }
 
@@ -1380,11 +1380,6 @@ func (s *Service) EnsureCodexAccounts(ctx context.Context, ids []string, include
 	return result, err
 }
 
-// EnsureCodexAccountCapacity refreshes account authentication and capacity.
-func (s *Service) EnsureCodexAccountCapacity(ctx context.Context, ids []string) (CodexAccounts, error) {
-	return s.EnsureCodexAccounts(ctx, ids, false)
-}
-
 // SubscribeCodexAccounts returns cached state followed by latest-wins updates.
 func (s *Service) SubscribeCodexAccounts(ctx context.Context) (<-chan CodexAccounts, error) {
 	if s.codexAccounts == nil {
@@ -1482,7 +1477,7 @@ func (s *Service) requireCodexAccountInstallation(ctx context.Context) error {
 }
 
 // InvalidateCodexAccountAuthentication invalidates the globally active account.
-func (s *Service) InvalidateCodexAccountAuthentication(_ string) {
+func (s *Service) InvalidateCodexAccountAuthentication() {
 	if s.codexAccounts == nil {
 		return
 	}
@@ -1494,13 +1489,6 @@ func (s *Service) InvalidateCodexAccountAuthentication(_ string) {
 	go func() { _ = s.codexAccounts.reconcileGlobal(s.codexAccounts.ctx) }()
 }
 
-// ObserveCodexAccountCapacity merges a structured provider event for one account.
-func (s *Service) ObserveCodexAccountCapacity(id string, observation ports.CodexCapacityObservation) {
-	if s.codexAccounts != nil {
-		s.codexAccounts.capacity.updateFromEvent(id, observation)
-	}
-}
-
 // ObserveActiveCodexAccountCapacity attributes a provider event to the active account.
 func (s *Service) ObserveActiveCodexAccountCapacity(observation ports.CodexCapacityObservation) {
 	if s.codexAccounts == nil {
@@ -1509,13 +1497,6 @@ func (s *Service) ObserveActiveCodexAccountCapacity(observation ports.CodexCapac
 	id := s.codexAccounts.activeAccountID()
 	if id != "" {
 		s.codexAccounts.capacity.updateFromEvent(id, observation)
-	}
-}
-
-// InvalidateCodexAccountCapacity marks one account's cached capacity stale.
-func (s *Service) InvalidateCodexAccountCapacity(id string) {
-	if s.codexAccounts != nil {
-		s.codexAccounts.capacity.invalidate(id, false)
 	}
 }
 

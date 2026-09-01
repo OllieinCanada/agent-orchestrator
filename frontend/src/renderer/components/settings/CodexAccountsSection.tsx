@@ -16,7 +16,7 @@ import {
 	useEnsureCodexAccounts,
 	verifyCodexAccountLogin,
 	type CodexAccount,
-} from "../../hooks/useCodexProfilesQuery";
+} from "../../hooks/useCodexAccountsQuery";
 import { shellTerminalsQueryKey } from "../../hooks/useShellTerminals";
 import type { TerminalSessionState } from "../../hooks/useTerminalSession";
 import { useShellMaybe } from "../../lib/shell-context";

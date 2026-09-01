@@ -7,7 +7,7 @@ import { sessionScmSummaryQueryKey } from "../hooks/useSessionScmSummary";
 import { conversationQueryKey, conversationQueryRoot } from "../hooks/useConversation";
 import { agentSwitchesQueryRoot } from "../hooks/useAgentSwitches";
 import { sessionUsageQueryRoot } from "../hooks/useSessionUsageSummaries";
-import { codexAccountsQueryKey } from "../hooks/codex-profile-cache";
+import { codexAccountsQueryKey } from "../hooks/codex-account-cache";
 import type { components } from "../../api/schema";
 
 export type EventTransport = {

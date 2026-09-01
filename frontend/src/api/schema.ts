@@ -2380,7 +2380,6 @@ export interface components {
             label: string;
             reason: string;
             reasonCode: string;
-            requiresLogin: boolean;
         };
         CompactConversationResponse: {
             /** Format: int64 */

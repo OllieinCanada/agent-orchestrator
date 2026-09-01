@@ -9,7 +9,7 @@ import {
 	cacheAgentReadiness,
 	ensureAgentReadiness,
 } from "./useAgentReadinessQuery";
-import { CODEX_ACCOUNT_DAEMON_RESET_EVENT, codexAccountLoginsQueryKey, codexAccountsQueryKey } from "./codex-profile-cache";
+import { CODEX_ACCOUNT_DAEMON_RESET_EVENT, codexAccountLoginsQueryKey, codexAccountsQueryKey } from "./codex-account-cache";
 import { useUiStore } from "../stores/ui-store";
 
 const STATUS_REFRESH_MS = 2_000;

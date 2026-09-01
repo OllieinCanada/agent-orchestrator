@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useCloudGate } from "../hooks/useCloudGate";
-import { cancelCodexAccountLogin } from "../hooks/useCodexProfilesQuery";
+import { cancelCodexAccountLogin } from "../hooks/useCodexAccountsQuery";
 import { shellTerminalsQueryKey } from "../hooks/useShellTerminals";
 import { GlobalSettingsForm } from "./GlobalSettingsForm";
 import {

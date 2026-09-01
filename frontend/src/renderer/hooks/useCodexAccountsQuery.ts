@@ -2,9 +2,9 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
-import { codexAccountsQueryKey } from "./codex-profile-cache";
+import { codexAccountsQueryKey } from "./codex-account-cache";
 
-export { CODEX_ACCOUNT_DAEMON_RESET_EVENT, codexAccountsQueryKey } from "./codex-profile-cache";
+export { CODEX_ACCOUNT_DAEMON_RESET_EVENT, codexAccountsQueryKey } from "./codex-account-cache";
 
 export type CodexAccountsResponse = components["schemas"]["CodexAccountsResponse"];
 export type CodexAccount = components["schemas"]["CodexAccountSnapshot"];

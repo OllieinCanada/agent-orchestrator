@@ -293,7 +293,7 @@ func Run() error {
 			}
 			rec, ok, readErr := store.GetSession(ctx, sessionID)
 			if readErr == nil && ok && rec.Harness == domain.HarnessCodex && rec.Metadata.ControllerGeneration == generation {
-				agentSvc.InvalidateCodexAccountAuthentication("")
+				agentSvc.InvalidateCodexAccountAuthentication()
 			}
 		},
 		OnCodexCapacityChanged: func(sessionID domain.SessionID, generation string, observation ports.CodexCapacityObservation) {

@@ -129,7 +129,7 @@ type Config struct {
 	DataDir string
 	// StateDir is the root for non-SQLite AO state. It defaults to ~/.ao. When
 	// AO_DATA_DIR is explicitly set, that override is also the state root so an
-	// isolated daemon never leaks profile state into the default home.
+	// isolated daemon never leaks account state into the default home.
 	StateDir string
 	// Agent is the compatibility agent adapter id selected by AO_AGENT;
 	// startSession fails fast if no adapter with this id is registered.

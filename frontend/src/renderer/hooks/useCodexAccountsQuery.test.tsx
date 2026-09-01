@@ -9,7 +9,7 @@ vi.mock("../lib/api-client", () => ({
 	apiErrorMessage: () => "request failed",
 }));
 
-import { codexAccountsQueryKey, useCodexAccountsQuery, useEnsureCodexAccounts } from "./useCodexProfilesQuery";
+import { codexAccountsQueryKey, useCodexAccountsQuery, useEnsureCodexAccounts } from "./useCodexAccountsQuery";
 
 const response = {
 	activeAccountId: null,
