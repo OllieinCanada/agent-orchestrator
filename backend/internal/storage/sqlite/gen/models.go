@@ -63,7 +63,7 @@ type AppSetting struct {
 	ID                 int64
 	DefaultSessionMode domain.SessionMode
 	UpdatedAt          time.Time
-	CloudOffering      int64
+	CloudOffering      bool
 }
 
 type ChangeLog struct {
@@ -73,6 +73,49 @@ type ChangeLog struct {
 	EventType cdc.EventType
 	Payload   string
 	CreatedAt time.Time
+}
+
+type CodexAccountSwitch struct {
+	ID                      string
+	SourceAccountID         string
+	TargetAccountID         string
+	IdempotencyKey          string
+	RequestFingerprint      string
+	ExpectedAccountRevision int64
+	Phase                   string
+	FailureCode             string
+	CancellationRequestedAt sql.NullTime
+	CredentialsCommittedAt  sql.NullTime
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	CompletedAt             sql.NullTime
+}
+
+type CodexAccountSwitchSession struct {
+	SwitchID                string
+	SessionID               string
+	NativeSessionID         string
+	InterfaceMode           string
+	SourceGeneration        string
+	WasRunning              bool
+	StopState               string
+	RestartState            string
+	TargetGeneration        string
+	ReviewerWasRunning      bool
+	ReviewerNativeSessionID string
+	ReviewerStopState       string
+	ReviewerRestartState    string
+	ErrorCode               string
+	StoppedAt               sql.NullTime
+	RestartedAt             sql.NullTime
+}
+
+type CodexActiveAccount struct {
+	SingletonID int64
+	AccountID   string
+	Revision    int64
+	ActivatedAt time.Time
+	UpdatedAt   time.Time
 }
 
 type Conversation struct {

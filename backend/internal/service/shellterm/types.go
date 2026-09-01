@@ -41,3 +41,14 @@ type OpenShellTerminalInput struct {
 	ProjectID domain.ProjectID `json:"projectId,omitempty"`
 	SessionID domain.SessionID `json:"sessionId,omitempty"`
 }
+
+// OpenCommandTerminalInput is the trusted backend-only request for a
+// standalone terminal running a fixed command. It must never be exposed as an
+// HTTP request shape: callers are responsible for constructing Argv and Env
+// from server-owned data.
+type OpenCommandTerminalInput struct {
+	Argv       []string
+	Env        map[string]string
+	WorkingDir string
+	Title      string
+}

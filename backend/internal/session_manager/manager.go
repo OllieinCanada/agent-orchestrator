@@ -281,6 +281,14 @@ type ReviewerTerminator interface {
 	RestoreReviewer(ctx context.Context, workerID domain.SessionID) error
 }
 
+type codexReviewerLifecycle interface {
+	CodexReviewerRunning(ctx context.Context, workerID domain.SessionID) (bool, error)
+	CodexReviewerBusy(ctx context.Context, workerID domain.SessionID) (bool, error)
+	CodexReviewerNativeSession(ctx context.Context, workerID domain.SessionID) (string, bool, error)
+	SuspendCodexReviewer(ctx context.Context, workerID domain.SessionID) (bool, error)
+	RestoreCodexReviewer(ctx context.Context, workerID domain.SessionID) error
+}
+
 type runtimeController interface {
 	Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error)
 	Destroy(ctx context.Context, handle ports.RuntimeHandle) error
@@ -386,13 +394,25 @@ type Manager struct {
 	// executable resolves the daemon's own binary (os.Executable in
 	// production); its directory is prepended to spawned sessions' PATH so the
 	// workspace hook commands resolve back to this daemon. Tests inject a stub.
-	executable      func() (string, error)
-	newLaunchID     func() string
-	agentOpMu       sync.Mutex
-	agentOperations map[domain.SessionID]agentOperationKind
+	executable                      func() (string, error)
+	newLaunchID                     func() string
+	codexAccountSwitchMu            sync.Mutex
+	codexAccountSwitchActive        bool
+	codexAccountSwitchWorkerRunning bool
+	codexAccountSwitchObserverMu    sync.Mutex
+	codexAccountSwitchObserver      func()
+	startupBackgroundReconcileDone  chan struct{}
+	startupBackgroundReconcileOnce  sync.Once
+	agentOpMu                       sync.Mutex
+	agentOperations                 map[domain.SessionID]agentOperationKind
 	// switchDecisionInput opens a narrow human-only terminal lane while the
 	// source is blocked on permission during a mandatory switch.
 	switchDecisionInput map[domain.SessionID]domain.AgentSwitchID
+	// codexAccountSwitchDecisionInput serves the equivalent narrow lane during
+	// a global Codex account switch. It is opened only while an already-running
+	// Codex TUI is visibly waiting on a provider-owned decision, then closed and
+	// drained before the exact controller generation is stopped.
+	codexAccountSwitchDecisionInput map[domain.SessionID]string
 	// retainedSwitches marks switch gates intentionally kept closed after an
 	// ambiguous external side effect (for example a target runtime that could
 	// not be removed). A later reconciliation pass may reclaim exactly these
@@ -487,6 +507,24 @@ func (m *Manager) SetAgentReadiness(provider ports.AgentReadinessProvider) {
 	m.agentReadiness = provider
 }
 
+// SetCodexAccountSwitchObserver connects durable switch transitions to the
+// account service's one provider-wide display stream. The callback carries no
+// credential or provider data and must remain non-blocking.
+func (m *Manager) SetCodexAccountSwitchObserver(observer func()) {
+	m.codexAccountSwitchObserverMu.Lock()
+	m.codexAccountSwitchObserver = observer
+	m.codexAccountSwitchObserverMu.Unlock()
+}
+
+func (m *Manager) publishCodexAccountSwitchChanged() {
+	m.codexAccountSwitchObserverMu.Lock()
+	observer := m.codexAccountSwitchObserver
+	m.codexAccountSwitchObserverMu.Unlock()
+	if observer != nil {
+		observer()
+	}
+}
+
 func (m *Manager) beginTerminalInputDrain(rec domain.SessionRecord) (lastInputAt time.Time, release func()) {
 	if domain.NormalizeSessionMode(rec.Mode) != domain.SessionModeTUI {
 		return time.Time{}, nil
@@ -528,6 +566,13 @@ func (m *Manager) SetReviewerTerminator(terminator ReviewerTerminator) {
 	m.reviewersMu.Lock()
 	defer m.reviewersMu.Unlock()
 	m.reviewers = terminator
+}
+
+func (m *Manager) codexReviewerLifecycle() codexReviewerLifecycle {
+	m.reviewersMu.Lock()
+	defer m.reviewersMu.Unlock()
+	reviewer, _ := m.reviewers.(codexReviewerLifecycle)
+	return reviewer
 }
 
 func (m *Manager) terminateReviewer(ctx context.Context, id domain.SessionID, body string) error {
@@ -664,37 +709,39 @@ type Deps struct {
 // time.Now when Deps.Clock is nil.
 func New(d Deps) *Manager {
 	m := &Manager{
-		runtime:                      d.Runtime,
-		agents:                       d.Agents,
-		workspace:                    d.Workspace,
-		store:                        d.Store,
-		defaults:                     d.Defaults,
-		chat:                         d.Chat,
-		lcm:                          d.Lifecycle,
-		preview:                      d.Preview,
-		browser:                      d.Browser,
-		browserCapabilities:          d.BrowserCapabilities,
-		attachments:                  attachmentstore.New(d.DataDir),
-		attachmentSuffix:             randomSuffix,
-		dataDir:                      d.DataDir,
-		runFilePath:                  strings.TrimSpace(d.RunFilePath),
-		clock:                        d.Clock,
-		reconcileWorkers:             d.ReconcileWorkers,
-		defaultBranchRefreshTimeout:  defaultBranchRefreshTimeout,
-		openTranscriptFile:           os.Open,
-		lookPath:                     d.LookPath,
-		executable:                   d.Executable,
-		newLaunchID:                  d.NewLaunchID,
-		backgroundContext:            d.BackgroundContext,
-		agentOperations:              make(map[domain.SessionID]agentOperationKind),
-		switchDecisionInput:          make(map[domain.SessionID]domain.AgentSwitchID),
-		retainedSwitches:             make(map[domain.SessionID]struct{}),
-		inputLeases:                  make(map[domain.SessionID]int),
-		inputDrained:                 make(map[domain.SessionID]chan struct{}),
-		handoffWait:                  90 * time.Second,
-		switchPermissionDecisionWait: time.Minute,
-		switchTargetStartWait:        3 * time.Second,
-		switchPostStopWait:           switchPostStopWait,
+		runtime:                         d.Runtime,
+		agents:                          d.Agents,
+		workspace:                       d.Workspace,
+		store:                           d.Store,
+		defaults:                        d.Defaults,
+		chat:                            d.Chat,
+		lcm:                             d.Lifecycle,
+		preview:                         d.Preview,
+		browser:                         d.Browser,
+		browserCapabilities:             d.BrowserCapabilities,
+		attachments:                     attachmentstore.New(d.DataDir),
+		attachmentSuffix:                randomSuffix,
+		dataDir:                         d.DataDir,
+		runFilePath:                     strings.TrimSpace(d.RunFilePath),
+		clock:                           d.Clock,
+		reconcileWorkers:                d.ReconcileWorkers,
+		defaultBranchRefreshTimeout:     defaultBranchRefreshTimeout,
+		openTranscriptFile:              os.Open,
+		lookPath:                        d.LookPath,
+		executable:                      d.Executable,
+		newLaunchID:                     d.NewLaunchID,
+		backgroundContext:               d.BackgroundContext,
+		startupBackgroundReconcileDone:  make(chan struct{}),
+		agentOperations:                 make(map[domain.SessionID]agentOperationKind),
+		switchDecisionInput:             make(map[domain.SessionID]domain.AgentSwitchID),
+		codexAccountSwitchDecisionInput: make(map[domain.SessionID]string),
+		retainedSwitches:                make(map[domain.SessionID]struct{}),
+		inputLeases:                     make(map[domain.SessionID]int),
+		inputDrained:                    make(map[domain.SessionID]chan struct{}),
+		handoffWait:                     90 * time.Second,
+		switchPermissionDecisionWait:    time.Minute,
+		switchTargetStartWait:           3 * time.Second,
+		switchPostStopWait:              switchPostStopWait,
 		// Provider startup, including slow MCP initialization, can delay the
 		// prompt-submit hook even though the continuation is correctly buffered.
 		// Leave enough headroom to avoid a false delivery failure.
@@ -763,6 +810,9 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	cfg.Harness = effectiveHarness(cfg.Harness, cfg.Kind, project.Config)
 	if cfg.Harness == "" {
 		return domain.SessionRecord{}, 0, 0, fmt.Errorf("spawn: %w: configure project %s.agent or pass --harness", ErrMissingHarness, roleConfigName(cfg.Kind))
+	}
+	if cfg.Harness == domain.HarnessCodex && m.codexAccountSwitchIsActive() {
+		return domain.SessionRecord{}, 0, 0, fmt.Errorf("spawn: %w", ErrCodexAccountSwitchInProgress)
 	}
 	// Reject an unknown harness before any durable state is created. Doing this
 	// after CreateSession would leave a terminated orphan row and waste a
@@ -1526,6 +1576,9 @@ func (m *Manager) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
 	if !ok {
 		return false, nil // already gone: benign race
 	}
+	if (rec.Harness == domain.HarnessCodex || rec.ReviewerHarness == domain.ReviewerCodex) && m.codexAccountSwitchIsActive() {
+		return false, fmt.Errorf("kill %s: %w", id, ErrCodexAccountSwitchInProgress)
+	}
 	m.stopPreviewBestEffort(ctx, id)
 	m.destroyBrowserBestEffort(ctx, id)
 	handle := runtimeHandle(rec.Metadata)
@@ -1843,6 +1896,9 @@ func (m *Manager) RestoreWithMode(ctx context.Context, id domain.SessionID) (Res
 	if !ok {
 		return RestoreResult{}, fmt.Errorf("restore %s: %w", id, ErrNotFound)
 	}
+	if (rec.Harness == domain.HarnessCodex || rec.ReviewerHarness == domain.ReviewerCodex) && m.codexAccountSwitchIsActive() {
+		return RestoreResult{}, fmt.Errorf("restore %s: %w", id, ErrCodexAccountSwitchInProgress)
+	}
 	if !rec.IsTerminated {
 		return RestoreResult{}, fmt.Errorf("restore %s: %w", id, ErrNotRestorable)
 	}
@@ -1904,6 +1960,9 @@ func (m *Manager) ResumeAgentWithMode(ctx context.Context, id domain.SessionID) 
 	}
 	if !ok {
 		return RestoreResult{}, fmt.Errorf("resume agent %s: %w", id, ErrNotFound)
+	}
+	if rec.Harness == domain.HarnessCodex && m.codexAccountSwitchIsActive() {
+		return RestoreResult{}, fmt.Errorf("resume agent %s: %w", id, ErrCodexAccountSwitchInProgress)
 	}
 	if rec.IsTerminated {
 		return RestoreResult{}, fmt.Errorf("resume agent %s: %w", id, ErrTerminated)
@@ -2008,6 +2067,10 @@ func (m *Manager) relaunchSessionWithPolicy(ctx context.Context, operation strin
 	if err != nil {
 		m.cleanupSystemPromptDir(rec.ID)
 		return RestoreResult{}, fmt.Errorf("%s %s: %w", operation, rec.ID, err)
+	}
+	if requireNativeHistory && !forceFresh && mode != RestoreModeNative {
+		m.cleanupSystemPromptDir(rec.ID)
+		return RestoreResult{}, fmt.Errorf("%s %s: %w", operation, rec.ID, ErrNotResumable)
 	}
 	if err := m.validateAgentBinary(argv); err != nil {
 		m.cleanupSystemPromptDir(rec.ID)
@@ -2439,6 +2502,9 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 // state that would otherwise lose its in-memory input fence across a daemon
 // restart. This must complete before the API accepts user input.
 func (m *Manager) ReconcileStartupSafety(ctx context.Context) error {
+	if err := m.ReconcileCodexAccountSwitches(ctx); err != nil {
+		return fmt.Errorf("reconcile: Codex account-switch pass: %w", err)
+	}
 	// A daemon restart destroys the in-memory input fence. Close any durable
 	// non-terminal switch before adopting runtimes so the API never implies an
 	// unconfirmed continuation was delivered.
@@ -2458,6 +2524,7 @@ func (m *Manager) ReconcileStartupSafety(ctx context.Context) error {
 // startup safety pass so the daemon can serve durable SQLite-backed project
 // and session metadata while this best-effort work continues.
 func (m *Manager) ReconcileBackground(ctx context.Context) error {
+	defer m.startupBackgroundReconcileOnce.Do(func() { close(m.startupBackgroundReconcileDone) })
 	recs, err := m.store.ListAllSessions(ctx)
 	if err != nil {
 		return fmt.Errorf("reconcile: list sessions: %w", err)
@@ -3013,6 +3080,13 @@ func (m *Manager) applyWorkspaceProjectPreserved(ctx context.Context, rows []por
 // the session is active or the budget is exhausted. Confirmation never fails
 // the send: it only decides whether to nudge again.
 func (m *Manager) Send(ctx context.Context, id domain.SessionID, message string, attachment *ports.SpawnAttachment) error {
+	if m.codexAccountSwitchIsActive() {
+		if rec, ok, err := m.store.GetSession(ctx, id); err != nil {
+			return fmt.Errorf("send %s: %w", id, err)
+		} else if ok && rec.Harness == domain.HarnessCodex {
+			return fmt.Errorf("send %s: %w", id, ErrCodexAccountSwitchInProgress)
+		}
+	}
 	if attachment != nil {
 		// Reuses StageAttachments rather than a bespoke writer: it already owns the
 		// empty-workspace guard (refusing beats writing under the daemon's cwd),
@@ -4121,12 +4195,10 @@ type workspaceCleaner interface {
 	CleanupWorkspace(ctx context.Context, cfg ports.WorkspaceHookConfig) error
 }
 
-type runtimeEnvAugmenter interface {
-	AugmentRuntimeEnv(env map[string]string, dataDir string)
-}
-
 func (m *Manager) augmentAgentRuntimeEnv(agent ports.Agent, env map[string]string) {
-	if augmenter, ok := agent.(runtimeEnvAugmenter); ok {
+	if augmenter, ok := agent.(interface {
+		AugmentRuntimeEnv(map[string]string, string)
+	}); ok {
 		augmenter.AugmentRuntimeEnv(env, m.dataDir)
 	}
 }

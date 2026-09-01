@@ -68,13 +68,14 @@ type Manager interface {
 
 // Service is the API-facing review service. It delegates to the core engine.
 type Service struct {
-	engine    *reviewcore.Engine
-	store     Store
-	requester ports.SCMReviewRequester
-	resolver  ports.SCMReviewResolver
-	lifecycle Reducer
-	clock     func() time.Time
-	telemetry ports.EventSink
+	engine          *reviewcore.Engine
+	store           Store
+	requester       ports.SCMReviewRequester
+	resolver        ports.SCMReviewResolver
+	lifecycle       Reducer
+	clock           func() time.Time
+	telemetry       ports.EventSink
+	codexSwitchGate interface{ CodexAccountSwitchInProgress() bool }
 	// engineTrigger indirects the engine's source-tagged trigger so the
 	// instrumented path can be exercised without standing up a full engine and
 	// its eighteen-method store. Defaulted in New; only tests replace it.
@@ -134,6 +135,12 @@ func WithReviewResolver(resolver ports.SCMReviewResolver) Option {
 // is how every existing test constructs it.
 func WithTelemetry(sink ports.EventSink) Option {
 	return func(s *Service) { s.telemetry = sink }
+}
+
+// WithCodexAccountSwitchGate prevents new Codex reviewer controllers from
+// entering while the device-global Codex credential is changing.
+func WithCodexAccountSwitchGate(gate interface{ CodexAccountSwitchInProgress() bool }) Option {
+	return func(s *Service) { s.codexSwitchGate = gate }
 }
 
 // emit reports an event when a sink is wired.
@@ -410,6 +417,9 @@ func (s *Service) triggerWithSource(
 	harness domain.ReviewerHarness,
 	source domain.ReviewTriggerSource,
 ) (reviewcore.TriggerResult, error) {
+	if s.codexReviewMutationBlocked(ctx, workerID, harness) {
+		return reviewcore.TriggerResult{}, ports.ErrCodexAccountSwitchInProgress
+	}
 	result, err := s.engineTrigger(ctx, workerID, harness, source)
 	if err != nil {
 		s.emit("ao.review.trigger_failed", workerID, map[string]any{
@@ -473,10 +483,52 @@ func (s *Service) RestoreReviewer(ctx context.Context, workerID domain.SessionID
 	return err
 }
 
+// CodexReviewerRunning reports whether the worker has a live Codex reviewer.
+func (s *Service) CodexReviewerRunning(ctx context.Context, workerID domain.SessionID) (bool, error) {
+	return s.engine.CodexReviewerRunning(ctx, workerID)
+}
+
+// CodexReviewerBusy reports whether the worker's Codex reviewer is active.
+func (s *Service) CodexReviewerBusy(ctx context.Context, workerID domain.SessionID) (bool, error) {
+	return s.engine.CodexReviewerBusy(ctx, workerID)
+}
+
+// CodexReviewerNativeSession returns the reviewer's exact native history identity.
+func (s *Service) CodexReviewerNativeSession(ctx context.Context, workerID domain.SessionID) (string, bool, error) {
+	return s.engine.CodexReviewerNativeSession(ctx, workerID)
+}
+
+// SuspendCodexReviewer stops the exact reviewer generation for account switching.
+func (s *Service) SuspendCodexReviewer(ctx context.Context, workerID domain.SessionID) (bool, error) {
+	return s.engine.SuspendCodexReviewer(ctx, workerID)
+}
+
+// RestoreCodexReviewer resumes the recorded reviewer native history.
+func (s *Service) RestoreCodexReviewer(ctx context.Context, workerID domain.SessionID) error {
+	return s.engine.RestoreCodexReviewer(ctx, workerID)
+}
+
 // SwitchReviewer atomically persists a worker's reviewer preference and returns
 // the authoritative post-switch review state.
 func (s *Service) SwitchReviewer(ctx context.Context, workerID domain.SessionID, harness domain.ReviewerHarness) (reviewcore.SessionReviews, error) {
+	if harness == domain.ReviewerCodex && s.codexSwitchGate != nil && s.codexSwitchGate.CodexAccountSwitchInProgress() {
+		return reviewcore.SessionReviews{}, ports.ErrCodexAccountSwitchInProgress
+	}
 	return s.engine.SwitchReviewer(ctx, workerID, harness)
+}
+
+func (s *Service) codexReviewMutationBlocked(ctx context.Context, workerID domain.SessionID, harness domain.ReviewerHarness) bool {
+	if s.codexSwitchGate == nil || !s.codexSwitchGate.CodexAccountSwitchInProgress() {
+		return false
+	}
+	if harness == domain.ReviewerCodex {
+		return true
+	}
+	if harness != "" {
+		return false
+	}
+	rec, ok, err := s.store.GetSession(ctx, workerID)
+	return err == nil && ok && (rec.Harness == domain.HarnessCodex || rec.ReviewerHarness == domain.ReviewerCodex)
 }
 
 // ActivitySignal is reviewer-owned hook metadata. It deliberately does not

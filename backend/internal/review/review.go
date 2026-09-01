@@ -521,6 +521,99 @@ func (e *Engine) RestoreReviewer(ctx stdctx.Context, workerID domain.SessionID) 
 	return e.restoreReviewerLocked(ctx, workerID, worker, harness)
 }
 
+// CodexReviewerRunning reports whether this worker owns a live Codex reviewer
+// controller. It performs no launch or mutation and never infers liveness from
+// a persisted handle alone.
+func (e *Engine) CodexReviewerRunning(ctx stdctx.Context, workerID domain.SessionID) (bool, error) {
+	if workerID == "" {
+		return false, fmt.Errorf("%w: worker session id is required", ErrInvalid)
+	}
+	unlock := e.lockWorker(workerID)
+	defer unlock()
+	reviewRow, ok, err := e.store.GetReviewBySessionAndHarness(ctx, workerID, domain.ReviewerCodex)
+	if err != nil || !ok || reviewRow.ReviewerHandleID == "" {
+		return false, err
+	}
+	return e.launcher.Alive(ctx, reviewRow.ReviewerHandleID)
+}
+
+// CodexReviewerBusy reports whether a Codex review turn is still durable as
+// running. Account switching waits for that turn instead of interrupting it.
+func (e *Engine) CodexReviewerBusy(ctx stdctx.Context, workerID domain.SessionID) (bool, error) {
+	runs, err := e.store.ListRunningReviewRunsBySession(ctx, workerID)
+	if err != nil {
+		return false, err
+	}
+	for _, run := range runs {
+		if run.Harness == domain.ReviewerCodex || run.Harness == "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// CodexReviewerNativeSession returns only the durable provider identity already
+// attached to this worker's Codex reviewer. It never discovers or scans native
+// history; Session Manager uses the exact ID to migrate the one attributed
+// rollout before global credential switching.
+func (e *Engine) CodexReviewerNativeSession(ctx stdctx.Context, workerID domain.SessionID) (string, bool, error) {
+	if workerID == "" {
+		return "", false, fmt.Errorf("%w: worker session id is required", ErrInvalid)
+	}
+	reviewRow, ok, err := e.store.GetReviewBySessionAndHarness(ctx, workerID, domain.ReviewerCodex)
+	if err != nil || !ok {
+		return "", false, err
+	}
+	id := strings.TrimSpace(reviewRow.AgentSessionID)
+	return id, id != "", nil
+}
+
+// SuspendCodexReviewer stops only the Codex reviewer pane while retaining its
+// native identity and review rows for an exact resume after account activation.
+func (e *Engine) SuspendCodexReviewer(ctx stdctx.Context, workerID domain.SessionID) (bool, error) {
+	if workerID == "" {
+		return false, fmt.Errorf("%w: worker session id is required", ErrInvalid)
+	}
+	unlock := e.lockWorker(workerID)
+	defer unlock()
+	reviewRow, ok, err := e.store.GetReviewBySessionAndHarness(ctx, workerID, domain.ReviewerCodex)
+	if err != nil || !ok || reviewRow.ReviewerHandleID == "" {
+		return false, err
+	}
+	alive, err := e.launcher.Alive(ctx, reviewRow.ReviewerHandleID)
+	if err != nil || !alive {
+		return false, err
+	}
+	if err := e.launcher.Destroy(ctx, reviewRow.ReviewerHandleID); err != nil {
+		return false, err
+	}
+	if err := e.store.ClearReviewerHandleByHarness(ctx, workerID, domain.ReviewerCodex); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// RestoreCodexReviewer relaunches only the retained Codex reviewer identity.
+func (e *Engine) RestoreCodexReviewer(ctx stdctx.Context, workerID domain.SessionID) error {
+	if workerID == "" {
+		return fmt.Errorf("%w: worker session id is required", ErrInvalid)
+	}
+	unlock := e.lockWorker(workerID)
+	defer unlock()
+	worker, ok, err := e.sessions.GetSession(ctx, workerID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%w: worker session %q", ErrNotFound, workerID)
+	}
+	if worker.IsTerminated || worker.Metadata.WorkspacePath == "" {
+		return nil
+	}
+	_, err = e.restoreReviewerLocked(ctx, workerID, worker, domain.ReviewerCodex)
+	return err
+}
+
 func (e *Engine) restoreReviewerLocked(ctx stdctx.Context, workerID domain.SessionID, worker domain.SessionRecord, harness domain.ReviewerHarness) (RestoreReviewerResult, error) {
 	reviewRows, err := e.store.ListReviewsBySession(ctx, workerID)
 	if err != nil {
@@ -560,13 +653,14 @@ func (e *Engine) restoreReviewerLocked(ctx stdctx.Context, workerID domain.Sessi
 		}
 	}
 	launch, err := e.launcher.RestoreTerminal(ctx, LaunchSpec{
-		ReviewSessionID: reviewRow.ID,
-		WorkerID:        worker.ID,
-		ProjectID:       worker.ProjectID,
-		Harness:         harness,
-		WorkspacePath:   worker.Metadata.WorkspacePath,
-		AgentSessionID:  agentSessionID,
-		PreviousRuns:    previousRuns,
+		ReviewSessionID:      reviewRow.ID,
+		WorkerID:             worker.ID,
+		ProjectID:            worker.ProjectID,
+		Harness:              harness,
+		WorkspacePath:        worker.Metadata.WorkspacePath,
+		AgentSessionID:       agentSessionID,
+		RequireNativeHistory: harness == domain.ReviewerCodex,
+		PreviousRuns:         previousRuns,
 	})
 	if err != nil {
 		return RestoreReviewerResult{}, fmt.Errorf("restore reviewer: %w", err)

@@ -13,12 +13,13 @@ import (
 type agentOperationKind string
 
 const (
-	agentOperationSwitch    agentOperationKind = "switch"
-	agentOperationResume    agentOperationKind = "resume"
-	agentOperationKill      agentOperationKind = "kill"
-	agentOperationRestore   agentOperationKind = "restore"
-	agentOperationRetire    agentOperationKind = "retire"
-	agentOperationReconcile agentOperationKind = "reconcile"
+	agentOperationSwitch             agentOperationKind = "switch"
+	agentOperationResume             agentOperationKind = "resume"
+	agentOperationKill               agentOperationKind = "kill"
+	agentOperationRestore            agentOperationKind = "restore"
+	agentOperationRetire             agentOperationKind = "retire"
+	agentOperationReconcile          agentOperationKind = "reconcile"
+	agentOperationCodexAccountSwitch agentOperationKind = "codex_account_switch"
 )
 
 var errAgentOperationInProgress = errors.New("session: another exclusive operation is in progress")
@@ -79,9 +80,16 @@ func (m *Manager) agentOperationActiveLocked(id domain.SessionID) bool {
 }
 
 func (m *Manager) agentSwitchDecisionInputAllowedLocked(id domain.SessionID) bool {
-	switching := m.agentOperations[id] == agentOperationSwitch
-	_, allowed := m.switchDecisionInput[id]
-	return switching && allowed
+	switch m.agentOperations[id] {
+	case agentOperationSwitch:
+		_, allowed := m.switchDecisionInput[id]
+		return allowed
+	case agentOperationCodexAccountSwitch:
+		_, allowed := m.codexAccountSwitchDecisionInput[id]
+		return allowed
+	default:
+		return false
+	}
 }
 
 // beginAgentOperation closes input admission before waiting for already-issued
@@ -164,6 +172,9 @@ func (m *Manager) endAgentOperation(id domain.SessionID, kind agentOperationKind
 	if kind == agentOperationSwitch {
 		delete(m.retainedSwitches, id)
 		delete(m.switchDecisionInput, id)
+	}
+	if kind == agentOperationCodexAccountSwitch {
+		delete(m.codexAccountSwitchDecisionInput, id)
 	}
 	if current, ok := m.agentOperations[id]; ok && current == kind {
 		delete(m.agentOperations, id)

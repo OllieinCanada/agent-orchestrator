@@ -169,6 +169,9 @@ func (m *Manager) launchChatController(ctx context.Context, in chatSpawn) (domai
 	// Chat Service retains this unprivileged base environment. The bearer is
 	// minted inside its per-session launch gate and is never cached for reuse.
 	env := m.runtimeEnv(id, in.record.ProjectID, in.record.IssueID, in.project.Config.Env)
+	if agent, ok := m.agents.Agent(in.cfg.Harness); ok {
+		m.augmentAgentRuntimeEnv(agent, env)
+	}
 
 	var (
 		controllerCommitted bool
@@ -193,6 +196,9 @@ func (m *Manager) launchChatController(ctx context.Context, in chatSpawn) (domai
 			)
 			if prepareErr != nil {
 				return nil, fmt.Errorf("%w: %w", ErrSpawnBrowser, prepareErr)
+			}
+			if agent, ok := m.agents.Agent(in.cfg.Harness); ok {
+				m.augmentAgentRuntimeEnv(agent, launchEnv)
 			}
 			in.record = prepared
 			return launchEnv, nil
@@ -369,6 +375,9 @@ func (m *Manager) resumeChatController(
 		return RestoreResult{}, fmt.Errorf("%s %s: workspace roots: %w", operation, rec.ID, err)
 	}
 	env := m.runtimeEnv(rec.ID, rec.ProjectID, rec.IssueID, project.Config.Env)
+	if agent, ok := m.agents.Agent(rec.Harness); ok {
+		m.augmentAgentRuntimeEnv(agent, env)
+	}
 	providerScopeID, err := m.historicalChatProviderScopeID(ctx, rec)
 	if err != nil {
 		return RestoreResult{}, fmt.Errorf("%s %s: recover provider ownership: %w", operation, rec.ID, err)
@@ -393,6 +402,9 @@ func (m *Manager) resumeChatController(
 			)
 			if prepareErr != nil {
 				return nil, prepareErr
+			}
+			if agent, ok := m.agents.Agent(rec.Harness); ok {
+				m.augmentAgentRuntimeEnv(agent, launchEnv)
 			}
 			rec = prepared
 			return launchEnv, nil
