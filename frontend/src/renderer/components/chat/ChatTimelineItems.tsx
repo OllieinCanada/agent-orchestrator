@@ -61,7 +61,7 @@ import { cn } from "../../lib/utils";
 import { caretNotation, stripAnsi } from "../../lib/ansi";
 import { getApiBaseUrl } from "../../lib/api-client";
 import { isWebLink, openLinkInSystemBrowser } from "../../lib/external-link-policy";
-import { ActivityTitle, ChatMarkdown } from "./ChatMarkdown";
+import { ActivityTitle, ChatMarkdown, SessionLinkedText } from "./ChatMarkdown";
 import { HighlightedCode } from "./HighlightedCode";
 import { CopyButton } from "./CopyButton";
 import { HumanMessageEditor } from "./HumanMessageEditor";
@@ -120,7 +120,9 @@ const STREAM_BASE_CHARACTERS_PER_SECOND = 58;
 const STREAM_TARGET_BACKLOG_CHARACTERS = 72;
 const STREAM_MAX_CHARACTERS_PER_SECOND = 720;
 const STREAM_MAX_FRAME_DELTA_MS = 100;
-const STREAM_MAX_DISPLAY_LAG_MS = 200;
+// Snapshot delivery already coalesces provider output. Smooth short gaps without
+// adding another perceptible playback delay on top of the transport cadence.
+const STREAM_MAX_DISPLAY_LAG_MS = 50;
 const STREAM_GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 function streamGraphemes(text: string): string[] {
@@ -403,7 +405,7 @@ function StagedAttachmentItems({
 }: {
 	paths: string[];
 	sessionId: string;
-	apiBaseUrl: string;
+	apiBaseUrl: string | null;
 	ariaLabel: string;
 	className?: string;
 }) {
@@ -412,7 +414,7 @@ function StagedAttachmentItems({
 		<ul aria-label={ariaLabel} className={cn("flex max-w-full flex-wrap gap-2", className)}>
 			{paths.map((path) => {
 				const name = attachmentName(path);
-				return IMAGE_ATTACHMENT_PATH.test(path) ? (
+				return IMAGE_ATTACHMENT_PATH.test(path) && apiBaseUrl !== null ? (
 					<li
 						key={path}
 						className="max-w-full overflow-hidden rounded-md border border-border bg-background"
@@ -475,6 +477,16 @@ function formatMessageTimestamp(iso: string, now = new Date()): string {
 /* -------------------------------------------------------------------------- */
 
 /** What the user typed. Right-aligned and enclosed so it reads as theirs. */
+const WORKER_REPORT_OPEN = "<ao-worker-reports>";
+const WORKER_REPORT_CLOSE = "</ao-worker-reports>";
+
+export function humanVisibleText(text: string): string {
+	if (!text.endsWith(WORKER_REPORT_CLOSE)) return text;
+	const reportStart = text.lastIndexOf(`\n\n${WORKER_REPORT_OPEN}\n`);
+	if (reportStart < 0) return text;
+	return text.slice(0, reportStart);
+}
+
 export function HumanMessage({
 	message,
 	sessionId,
@@ -503,7 +515,7 @@ export function HumanMessage({
 	/** The staged paths are relative to this session's workspace. */
 	sessionId: string;
 	/** The live daemon origin; passed by the timeline so daemon restarts refresh images. */
-	apiBaseUrl?: string;
+	apiBaseUrl?: string | null;
 	/** Typed while the agent was busy, and not sent yet. */
 	queued?: boolean;
 	/** True only for a human message added after the timeline first mounted. */
@@ -526,14 +538,15 @@ export function HumanMessage({
 	activateBranchPending?: boolean;
 	activateBranchError?: string;
 }) {
-	const { body, attachments } = stagedAttachmentParts(message.text);
+	const visibleMessageText = humanVisibleText(message.text);
+	const { body, attachments } = stagedAttachmentParts(visibleMessageText);
 	return (
 		<div className="group/message flex flex-col items-end gap-1">
 			{/* A queued message reads as not-yet-sent rather than as sent-and-ignored:
 			    the agent has not seen it, and the timeline should not imply it has. */}
 			{editing ? (
 				<HumanMessageEditor
-					text={editText ?? message.text}
+					text={editText ?? visibleMessageText}
 					content={message.content ?? []}
 					pending={editPending}
 					locked={Boolean(editRecoveryLabel)}
@@ -563,7 +576,11 @@ export function HumanMessage({
 							: "bg-raised text-foreground",
 					)}
 				>
-					{body ? <p className="break-words whitespace-pre-wrap text-pretty">{body}</p> : null}
+					{body ? (
+						<p className="break-words whitespace-pre-wrap text-pretty">
+							<SessionLinkedText text={body} />
+						</p>
+					) : null}
 					<StagedAttachmentItems
 						paths={attachments}
 						sessionId={sessionId}
@@ -598,7 +615,7 @@ export function HumanMessage({
 							</Tooltip>
 						) : null}
 						<CopyButton
-							text={message.text}
+							text={visibleMessageText}
 							label="Copy user message"
 							compact
 							className="size-7 justify-center rounded-md px-0 py-0 transition-[scale,background-color,color] duration-150 ease-out hover:bg-interactive-hover hover:text-foreground active:scale-[0.96] motion-reduce:transition-none motion-reduce:active:scale-100"
@@ -654,8 +671,8 @@ export function OriginMessage({ message }: { message: ConversationMessage }) {
 			{longReport && expanded ? (
 				<ChatMarkdown text={message.text} muted />
 			) : (
-				<p className={cn("text-sm leading-relaxed text-muted-foreground", longReport && "line-clamp-3")}>
-					{preview}
+				<p className={cn("whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground", longReport && "line-clamp-3")}>
+					<SessionLinkedText text={preview} />
 				</p>
 			)}
 			{longReport ? (
@@ -707,7 +724,8 @@ function BrowserAnnotationOrigin({
 										? `${item.changes.length} visual change${item.changes.length === 1 ? "" : "s"}`
 										: "Comment")}
 							</p>
-							{item.target ? <p className="truncate">{item.target}</p> : null}
+							{item.target ? <p className="truncate text-foreground">{item.target}</p> : null}
+							{item.text ? <p className="truncate">{item.text}</p> : null}
 						</div>
 					</div>
 				))}
@@ -2150,7 +2168,7 @@ export function SteerMessage({
 }: {
 	activity: ConversationActivity;
 	sessionId: string;
-	apiBaseUrl?: string;
+	apiBaseUrl?: string | null;
 }) {
 	const text = activity.detail?.text ?? activity.summary;
 	const { body, attachments } = stagedAttachmentParts(text);
@@ -2526,7 +2544,7 @@ export function TurnChangedFiles({
 	/** Opens the session Files inspector for the full workspace diff. */
 	onReview?: () => void;
 	/** Opens the Files inspector focused on this path. */
-	onOpenFile?: (path: string) => void;
+	onOpenFile?: (path: string, line?: number) => void;
 	/**
 	 * Timeline items from the same turn. Turn diffs often carry repo-relative
 	 * basenames (`random_words.txt`); file_change rows and command cwds often
@@ -2613,7 +2631,7 @@ export function TurnChangedFiles({
 									<TooltipTrigger asChild>
 										<button
 											type="button"
-											onClick={() => onOpenFile(openPath)}
+											onClick={() => onOpenFile(tooltipPath)}
 											aria-label={`Open ${openPath} in Files`}
 											className={rowClass}
 										>

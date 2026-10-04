@@ -22,6 +22,7 @@ import { haptics } from "../haptics";
 import { useApp } from "../store";
 import type { Theme } from "../theme";
 import { useTheme, useThemedStyles } from "../ThemeProvider";
+import { MascotLamp } from "../ui";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { HighlightedCodeText } from "./HighlightedCodeText";
 import { caretNotation, commandOutputText } from "./ansi";
@@ -64,6 +65,7 @@ import {
 	type ConversationGroup,
 } from "./timelineModel";
 import { type, space } from "../tokens";
+import { userFacingError } from "../connectionError";
 
 type TimelineRow =
 	| { kind: "single"; key: string; items: [ConversationItem] }
@@ -89,7 +91,7 @@ export const ChatTimeline = memo(function ChatTimeline({
 	inputPending: boolean;
 	onDecide(requestId: string, decisionId: string): Promise<void>;
 	onResolveInput(requestId: string, action: "accept" | "decline" | "cancel", content?: Record<string, unknown>): Promise<void>;
-	onRollback(turnId: string): Promise<number>;
+	onRollback?(turnId: string): Promise<number>;
 	jumpToSequence?: number;
 	onJumpHandled?(): void;
 	/**
@@ -128,7 +130,7 @@ export const ChatTimeline = memo(function ChatTimeline({
 		return (
 			<View style={styles.timelineWrap}>
 				<View style={styles.emptySurface}>
-					<EmptyConversation harness={snapshot.harness} controller={snapshot.controller.state} />
+					<EmptyConversation controller={snapshot.controller.state} />
 				</View>
 			</View>
 		);
@@ -198,7 +200,7 @@ function ConversationTurnGroup({ group, snapshot, approvalPending, inputPending,
 	inputPending: boolean;
 	onDecide(requestId: string, decisionId: string): Promise<void>;
 	onResolveInput(requestId: string, action: "accept" | "decline" | "cancel", content?: Record<string, unknown>): Promise<void>;
-	onRollback(turnId: string): Promise<number>;
+	onRollback?(turnId: string): Promise<number>;
 	answeredBelow?: number;
 }) {
 	// A provider failure arrives twice: as an error activity, and again as the
@@ -676,7 +678,7 @@ function TurnSummary({ turn, onRollback }: { turn: ConversationTurn; onRollback?
 							setRollingBack(true);
 							setRollbackError(undefined);
 							void onRollback(turn.id).then(() => setConfirming(false)).catch((cause) => {
-								setRollbackError(cause instanceof Error ? cause.message : String(cause));
+								setRollbackError(userFacingError(cause));
 							}).finally(() => setRollingBack(false));
 						}} />
 					</View>
@@ -786,7 +788,7 @@ function ApprovalCard({ activity, busy, onDecide, handledBelow }: { activity: Co
 			return <ElicitationAction key={decision.id} label={label} width={actionControlWidth(label, index === 0)} primary={index === 0} disabled={busy || Boolean(submitting) || !activity.requestId} onPress={() => {
 				setSubmitting(decision.id);
 				setSubmitError(undefined);
-				void onDecide(activity.requestId ?? "", decision.id).catch((cause) => setSubmitError(cause instanceof Error ? cause.message : String(cause))).finally(() => setSubmitting(undefined));
+				void onDecide(activity.requestId ?? "", decision.id).catch((cause) => setSubmitError(userFacingError(cause))).finally(() => setSubmitting(undefined));
 			}} />;
 		})}</View> : <Text style={[styles.partial, { color: t.amber }]}>The agent offered no decisions AO can present. Open diagnostics from the host.</Text>}
 		{submitError ? <Text accessibilityRole="alert" selectable style={styles.validation}>{submitError}</Text> : null}
@@ -817,7 +819,7 @@ function UserInputCard({ activity, busy, onResolve, handledBelow }: { activity: 
 		setSubmitting(true);
 		setSubmitError(undefined);
 		try { await onResolve(activity.requestId, action, content); }
-		catch (cause) { setSubmitError(cause instanceof Error ? cause.message : String(cause)); }
+		catch (cause) { setSubmitError(userFacingError(cause)); }
 		finally { setSubmitting(false); }
 	};
 	const submit = () => {
@@ -899,10 +901,9 @@ function ErrorActivity({ activity }: { activity: ConversationActivity }) {
 	return <View style={[styles.errorCard, { borderColor: t.tintRed }]}><Feather name="alert-triangle" size={15} color={t.red} /><View style={{ flex: 1 }}><Text style={styles.errorTitle}>{headline}</Text>{detail ? <Text selectable style={styles.errorCopy}>{detail}</Text> : null}</View></View>;
 }
 
-function EmptyConversation({ harness, controller }: { harness: string; controller: string }) {
-	const t = useTheme();
+function EmptyConversation({ controller }: { controller: string }) {
 	const styles = useThemedStyles(makeStyles);
-	return <View style={styles.empty}><View style={[styles.emptyIcon, { backgroundColor: t.accentTint }]}><Feather name="message-square" size={20} color={t.accent} /></View><Text style={styles.emptyTitle}>{controller === "connecting" ? "Connecting to the agent…" : "Start the conversation"}</Text><Text style={styles.emptyCopy}>This {harness || "agent"} session works in its own AO worktree. Ask it to inspect, change, test, or explain anything there.</Text></View>;
+	return <View style={styles.empty}><View style={styles.emptyMascot}><MascotLamp size={48} /></View><Text style={styles.emptyTitle}>{controller === "connecting" ? "Connecting to the agent…" : "Start with a task"}</Text></View>;
 }
 
 function Action({ label, hint, onPress, primary, tone, disabled }: { label: string; hint?: string; onPress(): void; primary?: boolean; tone?: "danger"; disabled?: boolean }) {
@@ -1097,7 +1098,6 @@ const makeStyles = (t: Theme) => StyleSheet.create({
 	errorTitle: { fontFamily: "Geist_600SemiBold", color: t.red, fontSize: type.caption1.fontSize, fontWeight: "600" },
 	errorCopy: { fontFamily: "Geist_400Regular", marginTop: space.xxs, color: t.textSecondary, fontSize: type.caption2.fontSize, lineHeight: type.caption2.lineHeight },
 	empty: { paddingVertical: 90, alignItems: "center", paddingHorizontal: space.xxl },
-	emptyIcon: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center", marginBottom: space.lg },
-	emptyTitle: { fontFamily: "Geist_600SemiBold", color: t.textPrimary, fontSize: type.body.fontSize, fontWeight: "600", marginBottom: space.xs },
-	emptyCopy: { fontFamily: "Geist_400Regular", color: t.textTertiary, fontSize: type.footnote.fontSize, lineHeight: type.footnote.lineHeight, textAlign: "center" },
+	emptyMascot: { marginBottom: space.lg },
+	emptyTitle: { fontFamily: "Geist_600SemiBold", color: t.textPrimary, fontSize: type.body.fontSize, fontWeight: "600" },
 });
