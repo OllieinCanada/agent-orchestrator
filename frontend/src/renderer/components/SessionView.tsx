@@ -438,6 +438,8 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	const toggleInspector = useUiStore((state) => state.toggleInspector);
 	const setInspectorViewForSession = useUiStore((state) => state.setInspectorView);
 	const setFilesChangedOnly = useUiStore((state) => state.setFilesChangedOnly);
+	const workspaceFileOpenRequest = useUiStore((state) => state.workspaceFileOpenRequest);
+	const clearWorkspaceFileOpenRequest = useUiStore((state) => state.clearWorkspaceFileOpenRequest);
 	const initializeInspectorSession = useUiStore((state) => state.initializeInspectorSession);
 	const setBrowserContentRevealed = useUiStore((state) => state.setBrowserContentRevealed);
 	const setBrowserUnseen = useUiStore((state) => state.setBrowserUnseen);
@@ -1302,6 +1304,27 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		},
 		[revealResolvedWorkspaceFile],
 	);
+
+	useEffect(() => {
+		if (!workspaceFileOpenRequest || !session) return;
+		if (sessionUiKey(workspaceFileOpenRequest.sessionId, workspaceFileOpenRequest.hostId) !== uiSessionId) return;
+		const { nonce, path } = workspaceFileOpenRequest;
+		if (session.cloud) {
+			prepareFilesInspector();
+			openCenterFile(path, { mode: "file" });
+		} else {
+			handleOpenFile(path);
+		}
+		clearWorkspaceFileOpenRequest(nonce);
+	}, [
+		clearWorkspaceFileOpenRequest,
+		handleOpenFile,
+		openCenterFile,
+		prepareFilesInspector,
+		session,
+		uiSessionId,
+		workspaceFileOpenRequest,
+	]);
 
 	const handleToggleFilesPopOut = useCallback(
 		(next: boolean) => {
