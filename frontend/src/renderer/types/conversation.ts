@@ -66,6 +66,18 @@ export type ActivityStatus =
  */
 export type DeliveryState = "queued" | "sending" | "accepted" | "uncertain" | "failed";
 
+/**
+ * Result of attempting to steer a running turn. A typed non-acceptance proves
+ * that the provider did not receive this guidance; transport ambiguity rejects
+ * the promise instead and remains fail-closed in the composer.
+ */
+export type ChatSteerOutcome =
+	| { status: "accepted" }
+	| { status: "not-accepted"; reason: string };
+
+/** Durable inline-edit acceptance; uncertainty remains a rejected promise. */
+export type ChatEditOutcome = ChatSteerOutcome;
+
 /** How far the agent has got with one step of its plan. */
 export type PlanStepStatus = "pending" | "in_progress" | "completed";
 
@@ -142,6 +154,13 @@ export interface ConversationContentSummary {
 	name?: string;
 }
 
+export interface QueuedMessageEditOptions {
+	clientMessageId?: string;
+	attachments?: { mimeType: string; data: string }[];
+	retainedContent?: number[];
+	expectedRevision?: number;
+}
+
 export interface ConversationMessage {
 	kind: "message";
 	id: string;
@@ -194,6 +213,12 @@ export interface ApprovalDetail {
 	subjectKind?: ActivityKind;
 	/** ACP's tool category, retained for diagnostics and forward compatibility. */
 	toolKind?: string;
+}
+
+/** Provider-supplied recovery information carried by an error activity. */
+export interface ProviderErrorDetail {
+	/** Optional provider destination; the renderer shows web URLs literally. */
+	actionUrl?: string;
 }
 
 export interface CommandDetail {
@@ -292,6 +317,9 @@ export interface FileChangeFile {
 	additions: number;
 	deletions: number;
 	patch?: string;
+	/** Native provider before/after text, used to render a fallback diff. */
+	oldText?: string;
+	newText?: string;
 	/** The patch was cut at the daemon's cap, so it is not the whole change. */
 	patchTruncated?: boolean;
 }
@@ -324,6 +352,8 @@ export interface McpToolDetail {
 	namespace?: string;
 	arguments?: unknown;
 	result?: unknown;
+	/** Structured provider content, including native ACP read output. */
+	content?: unknown;
 	error?: string;
 	success?: boolean;
 	/** Progress notes streamed while a long call runs. */
@@ -372,11 +402,12 @@ export interface SystemEventDetail {
 		| "provider.failure"
 		| "steer"
 		| "plan"
-		| "context.reset";
+		| "context.reset"
+		| "context.boundary";
 	/** model.rerouted */
 	fromModel?: string;
 	toModel?: string;
-	/** provider.failure: provider-neutral classification from an agent protocol extension. */
+	/** provider.failure */
 	category?: string;
 	severity?: "warning" | "error" | (string & {});
 	revision?: number;
@@ -494,6 +525,7 @@ export interface ConversationActivity {
 	 */
 	detail?: CommandDetail &
 		ApprovalDetail &
+		ProviderErrorDetail &
 		FileChangeDetail &
 		UsageDetail &
 		CompactionDetail &
@@ -563,6 +595,8 @@ export interface ChatConfigOption {
 
 /** One value offered by a select config option. */
 export interface ChatConfigChoice {
+	/** Exact AO permission equivalent supplied by the daemon, when supported. */
+	permissionMode?: ApprovalMode;
 	value: string;
 	name: string;
 	description?: string;
@@ -650,11 +684,16 @@ export interface ModelReroute {
 
 /** The provider account this conversation runs under. */
 export interface ConversationAccount {
+	authenticationState?: "unknown" | "required" | "authenticated";
+	authVerifiedAt?: string;
+	lastAuthFailureAt?: string;
+	lastAuthFailureReason?: string;
+	authFailureId?: string;
 	authMode?: string;
 	planLabel?: string;
 	/**
 	 * When the provider last demanded credentials AO does not hold. Present means the
-	 * session has stopped working for a reason no retry will fix.
+	 * daemon has not yet verified recovery.
 	 */
 	reauthRequiredAt?: string;
 	reauthReason?: string;
@@ -790,7 +829,8 @@ export function brokenMcpServers(snapshot: ConversationSnapshot): McpServer[] {
 
 /** Whether the provider is demanding credentials the daemon does not hold. */
 export function needsReauth(snapshot: ConversationSnapshot): boolean {
-	return Boolean(snapshot.account?.reauthRequiredAt);
+	return snapshot.account?.authenticationState === "required" ||
+		(snapshot.account?.authenticationState === undefined && Boolean(snapshot.account?.reauthRequiredAt));
 }
 
 /**
@@ -807,15 +847,31 @@ export function activeTurn(snapshot: ConversationSnapshot): ConversationTurn | u
 }
 
 /**
- * Turn ids whose human prompt must not appear in the timeline.
+ * Turn ids whose human prompt is represented in the queue dock instead.
  *
- * Queued turns live in the dock until dispatch. Turns cancelled from the dock
- * before dispatch must not reappear in the timeline after the snapshot refreshes.
+ * Human prompts for queued turns live in the dock until dispatch. Automation
+ * messages have no dock row, so their queued feedback stays visible in the
+ * timeline. Human turns cancelled from the dock must not reappear after refresh.
  */
 export function hiddenTimelineTurnIds(snapshot: ConversationSnapshot): Set<string> {
+	const humanPromptTurnIds = new Set<string>();
+	for (const item of snapshot.items) {
+		if (
+			item.kind === "message" &&
+			item.role === "user" &&
+			item.origin === "human" &&
+			item.turnId
+		) {
+			humanPromptTurnIds.add(item.turnId);
+		}
+	}
 	return new Set(
 		snapshot.turns
-			.filter((turn) => turn.state === "queued" || turn.state === "cancelled")
+			.filter(
+				(turn) =>
+					(turn.state === "queued" || turn.state === "cancelled") &&
+					humanPromptTurnIds.has(turn.id),
+			)
 			.map((turn) => turn.id),
 	);
 }

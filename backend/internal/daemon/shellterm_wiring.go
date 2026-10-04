@@ -7,18 +7,16 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 	shelltermsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/shellterm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
 
-// startShellTerminals builds the standalone shell terminal service and sweeps
-// any terminals left behind by a previous app run.
-//
-// The sweep runs at boot, before the server serves, for the same reason session
-// reconciliation does: a client that connects first would otherwise see — and
-// try to attach to — shells belonging to an app that is already gone.
+// startShellTerminals restores durable user shells and cleans up expired command
+// terminals before accepting clients. A different app launch alone never ends
+// a user shell's lifetime.
 func startShellTerminals(
 	ctx context.Context,
 	cfg config.Config,
@@ -114,4 +112,23 @@ func (l *sessionWorkspaceLocator) SessionWorkspace(ctx context.Context, id domai
 		}
 	}
 	return path, sess.ProjectID, nil
+}
+
+// CueCommandSessionTarget preserves the exact recorded worktree and lifecycle
+// facts so command Cues can fail closed instead of falling back to a project
+// root or using a session that can no longer accept work.
+func (l *sessionWorkspaceLocator) CueCommandSessionTarget(ctx context.Context, id domain.SessionID) (shelltermsvc.CueCommandSessionTarget, error) {
+	if l.sessions == nil {
+		return shelltermsvc.CueCommandSessionTarget{}, apierr.Internal("SHELL_TERMINAL_NO_SESSION_LOOKUP", "Session lookup is unavailable")
+	}
+	sess, err := l.sessions.Get(ctx, id)
+	if err != nil {
+		return shelltermsvc.CueCommandSessionTarget{}, err
+	}
+	return shelltermsvc.CueCommandSessionTarget{
+		ProjectID:     sess.ProjectID,
+		WorkspacePath: sess.Metadata.WorkspacePath,
+		Activity:      sess.Activity.State,
+		IsTerminated:  sess.IsTerminated,
+	}, nil
 }

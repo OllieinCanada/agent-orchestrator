@@ -64,13 +64,15 @@ type Deps struct {
 	Out io.Writer
 	Err io.Writer
 
-	HTTPClient         *http.Client
-	Executable         func() (string, error)
-	StartProcess       func(processStartConfig) error
-	ProcessAlive       func(pid int) bool
-	LookPath           func(file string) (string, error)
-	CommandOutput      func(ctx context.Context, name string, args ...string) ([]byte, error)
-	CommandOutputInDir func(ctx context.Context, dir, name string, args ...string) ([]byte, error)
+	HTTPClient            *http.Client
+	Executable            func() (string, error)
+	StartProcess          func(processStartConfig) error
+	ProcessAlive          func(pid int) bool
+	LookPath              func(file string) (string, error)
+	CommandOutput         func(ctx context.Context, name string, args ...string) ([]byte, error)
+	CommandOutputInDir    func(ctx context.Context, dir, name string, args ...string) ([]byte, error)
+	RunInteractiveCommand func(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error
+	ReadSecret            func(io.Reader) ([]byte, error)
 	// DoctorGitHubRESTBase lets tests point the doctor GitHub token probe at
 	// httptest without mutating package-global state.
 	DoctorGitHubRESTBase string
@@ -84,20 +86,22 @@ type Deps struct {
 // DefaultDeps returns production dependencies.
 func DefaultDeps() Deps {
 	return Deps{
-		In:                   os.Stdin,
-		Out:                  os.Stdout,
-		Err:                  os.Stderr,
-		HTTPClient:           &http.Client{Timeout: 2 * time.Second},
-		Executable:           os.Executable,
-		StartProcess:         startProcess,
-		ProcessAlive:         processalive.Alive,
-		LookPath:             exec.LookPath,
-		CommandOutput:        commandOutput,
-		CommandOutputInDir:   commandOutputInDir,
-		DoctorGitHubRESTBase: defaultDoctorGitHubRESTBase,
-		DoctorGitLabRESTBase: defaultDoctorGitLabRESTBase,
-		Now:                  time.Now,
-		Sleep:                time.Sleep,
+		In:                    os.Stdin,
+		Out:                   os.Stdout,
+		Err:                   os.Stderr,
+		HTTPClient:            &http.Client{Timeout: 2 * time.Second},
+		Executable:            os.Executable,
+		StartProcess:          startProcess,
+		ProcessAlive:          processalive.Alive,
+		LookPath:              exec.LookPath,
+		CommandOutput:         commandOutput,
+		CommandOutputInDir:    commandOutputInDir,
+		RunInteractiveCommand: runInteractiveCommand,
+		ReadSecret:            readSecret,
+		DoctorGitHubRESTBase:  defaultDoctorGitHubRESTBase,
+		DoctorGitLabRESTBase:  defaultDoctorGitLabRESTBase,
+		Now:                   time.Now,
+		Sleep:                 time.Sleep,
 	}
 }
 
@@ -142,6 +146,12 @@ func (d Deps) withDefaults() Deps {
 	}
 	if d.CommandOutputInDir == nil {
 		d.CommandOutputInDir = def.CommandOutputInDir
+	}
+	if d.RunInteractiveCommand == nil {
+		d.RunInteractiveCommand = def.RunInteractiveCommand
+	}
+	if d.ReadSecret == nil {
+		d.ReadSecret = def.ReadSecret
 	}
 	if d.DoctorGitHubRESTBase == "" {
 		d.DoctorGitHubRESTBase = def.DoctorGitHubRESTBase
@@ -191,17 +201,22 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	root.AddCommand(newStartCommand(ctx))
 	root.AddCommand(newStopCommand(ctx))
 	root.AddCommand(newStatusCommand(ctx))
+	root.AddCommand(newRemoteHostCommand(ctx))
 	root.AddCommand(newDoctorCommand(ctx))
 	root.AddCommand(newAgentCommand(ctx))
 	root.AddCommand(newSpawnCommand(ctx))
 	root.AddCommand(newSendCommand(ctx))
+	root.AddCommand(newReportCommand(ctx))
 	root.AddCommand(newPreviewCommand(ctx))
 	root.AddCommand(newBrowserCommand(ctx))
 	root.AddCommand(newHooksCommand(ctx))
 	root.AddCommand(newAgentProcessCommand(ctx))
 	root.AddCommand(newChatHostCommand())
+	root.AddCommand(newUnrealProviderCommand())
 	root.AddCommand(newLaunchCommand(ctx))
 	root.AddCommand(newPtyHostCommand())
+	root.AddCommand(newCodexLoginCommand(ctx))
+	root.AddCommand(newClaudeLoginCommand(ctx))
 	root.AddCommand(newImportCommand(ctx))
 	root.AddCommand(newDevCommand(ctx))
 	root.AddCommand(newProjectCommand(ctx))
@@ -209,6 +224,8 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	root.AddCommand(newOrchestratorCommand(ctx))
 	root.AddCommand(newPRCommand(ctx))
 	root.AddCommand(newReviewCommand(ctx))
+	root.AddCommand(newAutomationCommand(ctx))
+	root.AddCommand(newCueCommand(ctx))
 	root.AddCommand(newCompletionCommand())
 	root.AddCommand(newVersionCommand())
 
@@ -229,7 +246,7 @@ func shouldEmitCLIInvocation(cmd *cobra.Command) bool {
 	// "ao completion"/"ao help" are shell setup and self-documentation.
 	// "ao pty-host" and "ao agent-process" are internal runtime processes.
 	// None reflect user activity.
-	case "ao daemon", "ao start", "ao completion", "ao help", "ao pty-host", "ao chat-host", "ao agent-process", "ao agent-process supervise":
+	case "ao daemon", "ao start", "ao completion", "ao help", "ao pty-host", "ao chat-host", "ao unreal-provider", "ao codex-login", "ao claude-login", "ao agent-process", "ao agent-process supervise":
 		return false
 	default:
 		return true

@@ -11,6 +11,7 @@ import {
 	type PullRequestFacts,
 	type WorkspaceSession,
 	type WorkspaceSummary,
+	STANDALONE_WORKSPACE_ID,
 } from "../types/workspace";
 import {
 	openReviewStatesFor,
@@ -23,10 +24,12 @@ import { appI18n, type MessageKey } from "../i18n";
 export type CommandGroupId = "current" | "attention" | "projects" | "sessions" | "prs" | "global";
 
 export type NavigateTarget =
+	| { to: "/" }
 	| { to: "/settings" }
 	| { to: "/projects/$projectId"; params: { projectId: string } }
 	| { to: "/projects/$projectId/settings"; params: { projectId: string } }
-	| { to: "/projects/$projectId/sessions/$sessionId"; params: { projectId: string; sessionId: string } };
+	| { to: "/projects/$projectId/sessions/$sessionId"; params: { projectId: string; sessionId: string } }
+	| { to: "/sessions/$sessionId"; params: { sessionId: string } };
 
 export type CommandAction =
 	| { kind: "navigate"; target: NavigateTarget }
@@ -116,6 +119,9 @@ export type WorkspaceSessionContext = {
 };
 
 function jumpTarget(workspace: WorkspaceSummary, session: WorkspaceSession): NavigateTarget {
+	if (workspace.id === STANDALONE_WORKSPACE_ID) {
+		return { to: "/sessions/$sessionId", params: { sessionId: session.id } };
+	}
 	return {
 		to: "/projects/$projectId/sessions/$sessionId",
 		params: { projectId: workspace.id, sessionId: session.id },
@@ -212,27 +218,29 @@ export function buildCommands(ctx: CommandPaletteContext, t: TFunction = appI18n
 	});
 
 	if (currentProject) {
-		items.push({
-			id: "current-open-orchestrator",
-			group: "current",
-			title: t("command.openOrchestrator"),
-			subtitle: currentProject.name,
-			keywords: ["orchestrator", "spawn", currentProject.name],
-			disabled: isProjectRestarting,
-			disabledReason: isProjectRestarting ? t("command.orchestratorRestarting") : undefined,
-			action: { kind: "open-orchestrator", projectId: currentProject.id },
-		});
-		items.push({
-			id: "current-project-settings",
-			group: "current",
-			title: t("command.projectSettings"),
-			subtitle: currentProject.name,
-			keywords: ["settings", "config", currentProject.name],
-			action: {
-				kind: "navigate",
-				target: { to: "/projects/$projectId/settings", params: { projectId: currentProject.id } },
-			},
-		});
+		if (currentProject.id !== STANDALONE_WORKSPACE_ID) {
+			items.push({
+				id: "current-open-orchestrator",
+				group: "current",
+				title: t("command.openOrchestrator"),
+				subtitle: currentProject.name,
+				keywords: ["orchestrator", "spawn", currentProject.name],
+				disabled: isProjectRestarting,
+				disabledReason: isProjectRestarting ? t("command.orchestratorRestarting") : undefined,
+				action: { kind: "open-orchestrator", projectId: currentProject.id },
+			});
+			items.push({
+				id: "current-project-settings",
+				group: "current",
+				title: t("command.projectSettings"),
+				subtitle: currentProject.name,
+				keywords: ["settings", "config", currentProject.name],
+				action: {
+					kind: "navigate",
+					target: { to: "/projects/$projectId/settings", params: { projectId: currentProject.id } },
+				},
+			});
+		}
 	}
 
 	const currentBranch = currentSession?.branch;
@@ -264,7 +272,7 @@ export function buildCommands(ctx: CommandPaletteContext, t: TFunction = appI18n
 		items.push(sessionCommand(workspace, session, "attention"));
 	}
 
-	for (const workspace of workspaces) {
+	for (const workspace of workspaces.filter((candidate) => candidate.id !== STANDALONE_WORKSPACE_ID)) {
 		items.push({
 			id: `project:${workspace.id}`,
 			group: "projects",
@@ -303,19 +311,13 @@ export function buildCommands(ctx: CommandPaletteContext, t: TFunction = appI18n
 					workspace.name,
 					pr.state,
 				];
-				items.push({
+			items.push({
 					id: `pr:${session.id}:${pr.number}`,
 					group: "prs",
 					title: `#${pr.number}`,
 					subtitle,
 					keywords: prKeywords,
-					action: {
-						kind: "navigate",
-						target: {
-							to: "/projects/$projectId/sessions/$sessionId",
-							params: { projectId: workspace.id, sessionId: session.id },
-						},
-					},
+					action: { kind: "navigate", target: jumpTarget(workspace, session) },
 				});
 				items.push({
 					id: `pr-open:${session.id}:${pr.number}`,
@@ -342,6 +344,13 @@ export function buildCommands(ctx: CommandPaletteContext, t: TFunction = appI18n
 		}
 	}
 
+	items.push({
+		id: "global-home",
+		group: "global",
+		title: t("shell.goHome"),
+		keywords: ["home", "start", "get started", "clone", "import", "standalone"],
+		action: { kind: "navigate", target: { to: "/" } },
+	});
 	items.push({
 		id: "global-new-project",
 		group: "global",

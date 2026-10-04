@@ -10,7 +10,9 @@
  *
  *   - `rehype-raw` is deliberately absent. A worker's markdown file is agent-
  *     produced content; markdown-only is the whole sanitization story and there
- *     is no schema to get wrong.
+ *     is no schema to get wrong — except ```mermaid fences, which render as
+ *     diagrams through the shared `MermaidBlock` (strict mode plus DOMPurify,
+ *     active-content tags forbidden), matching the chat surface.
  *   - Fenced code reuses the app's existing lowlight/highlight.js engine
  *     (`lib/code-highlight.ts`) rather than Shiki: the renderer's CSP
  *     (`script-src 'self'`, no `wasm-unsafe-eval`) blocks Shiki's default WASM
@@ -36,6 +38,7 @@ import { canonicalLanguage } from "../../lib/code-highlight";
 import { fenceOf } from "../../lib/markdown-fence";
 import { isWebLink } from "../../lib/external-link-policy";
 import { HighlightedCode } from "../chat/HighlightedCode";
+import { MermaidBlock } from "../chat/MermaidBlock";
 import "../chat/code-theme.css";
 import "github-markdown-css/github-markdown.css";
 import { MarkdownFileContext } from "./markdown-file-context";
@@ -63,12 +66,14 @@ const REHYPE_PLUGINS: PluggableList = [
 
 export function MarkdownFileView({
 	sessionId,
+	hostId,
 	filePath,
 	content,
 	truncated,
 	version,
 }: {
 	sessionId: string;
+	hostId?: string;
 	filePath: string;
 	content: string;
 	/** The daemon capped the file it sent; what renders below is a prefix of it. */
@@ -78,7 +83,7 @@ export function MarkdownFileView({
 }) {
 	const { t } = useTranslation();
 	const bodyRef = useRef<HTMLDivElement>(null);
-	const contextValue = useMemo(() => ({ sessionId, filePath, version }), [sessionId, filePath, version]);
+	const contextValue = useMemo(() => ({ sessionId, hostId, filePath, version }), [sessionId, hostId, filePath, version]);
 
 	// Heading slugs are unique per rendered file, not per document, and the Files
 	// tab expands many files at once — two open READMEs both containing
@@ -100,6 +105,12 @@ export function MarkdownFileView({
 			pre: ({ children }) => {
 				const fence = fenceOf(children);
 				if (!fence) return <>{children}</>;
+				// Diagrams render through the same sandboxed SVG path as chat;
+				// a markdown preview that showed source where chat showed a
+				// picture would disagree with the conversation about the file.
+				if (fence.language?.toLowerCase() === "mermaid") {
+					return <MermaidBlock code={fence.code} />;
+				}
 				return (
 					<pre className="markdown-code">
 						<code>
@@ -149,7 +160,10 @@ export function MarkdownFileView({
 						{t("files.contentTruncated")}
 					</div>
 				) : null}
-				<div className="markdown-body p-4" ref={bodyRef}>
+				{/* github-markdown-css hangs each heading's `.anchor` link icon 20px
+				    into the left gutter (`margin-left: -20px`), so the inline padding
+				    must be wider than that or the scroll container clips the icon. */}
+				<div className="markdown-body px-6 py-4" ref={bodyRef}>
 					<Markdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={components}>
 						{content}
 					</Markdown>

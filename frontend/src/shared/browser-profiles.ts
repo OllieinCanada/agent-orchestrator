@@ -48,7 +48,7 @@ export type BrowserProfileViewState = {
 	viewId: string;
 	profileId: BrowserProfileId | null;
 	profileName?: string;
-	/** True when the selection is the per-worker memory-only profile. */
+	/** True when the selection is the per-worker temporary profile. */
 	temporary: boolean;
 };
 
@@ -72,6 +72,12 @@ export type BrowserProfileMenuLabels = {
 export type BrowserProfileMenuInput = {
 	viewId: string;
 	bounds: BrowserMenuBounds;
+	labels: BrowserProfileMenuLabels;
+};
+
+export type BrowserProfileSelectInput = {
+	viewId: string;
+	profileId: BrowserProfileId | null;
 	labels: BrowserProfileMenuLabels;
 };
 

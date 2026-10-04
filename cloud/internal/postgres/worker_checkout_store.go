@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -69,6 +70,107 @@ func (s *Store) WorkerGitHubCheckoutContext(
 		return domain.GitHubCheckoutContext{}, err
 	}
 	return authorization, nil
+}
+
+// WorkerSessionExtraRepos returns the additional repositories a session's
+// project declares (the coder dev-kit "extraRepos"), if any. It is a
+// best-effort read used only to broaden a checkout token's repository scope, so
+// callers must tolerate an empty result and must never fail the primary checkout
+// on its account. Repository and installation authority still come exclusively
+// from WorkerGitHubCheckoutContext — this only tells the caller which additional
+// repositories the project asked to have cloned alongside the primary one.
+func (s *Store) WorkerSessionExtraRepos(
+	ctx context.Context,
+	orgID, sessionID string,
+) ([]domain.RepoRef, error) {
+	var config json.RawMessage
+	err := s.withOrg(ctx, orgID, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx,
+			`SELECT project.config
+			FROM ao_sessions session
+			JOIN ao_projects project
+			  ON project.org_id = session.org_id AND project.id = session.project_id
+			WHERE session.org_id = $1 AND session.id = $2
+			  AND session.is_terminated = false`,
+			orgID, sessionID,
+		).Scan(&config)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("load session extra repositories: %w", err)
+		}
+		return nil
+	})
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	coder, ok := domain.DecodeProjectCoderConfig(config)
+	if !ok {
+		return nil, nil
+	}
+	return coder.ExtraRepos, nil
+}
+
+// WorkerGitHubPAT resolves the session creator's explicitly configured GitHub
+// personal access token. It deliberately derives the repository and token
+// owner from the session rather than accepting either from the worker.
+func (s *Store) WorkerGitHubPAT(
+	ctx context.Context,
+	orgID, sessionID, workerID string,
+	epoch int64,
+) (domain.WorkerGitHubPAT, error) {
+	var credential domain.WorkerGitHubPAT
+	err := s.withOrg(ctx, orgID, func(tx pgx.Tx) error {
+		if err := requireCurrentWorker(ctx, tx, orgID, sessionID, workerID, epoch); err != nil {
+			return err
+		}
+		var ownerUserID *string
+		if err := tx.QueryRow(ctx,
+			`SELECT project.repository_url, session.created_by_user_id::text
+			FROM ao_sessions session
+			JOIN ao_projects project
+			  ON project.org_id = session.org_id AND project.id = session.project_id
+			WHERE session.org_id = $1 AND session.id = $2
+			  AND session.is_terminated = false`,
+			orgID, sessionID,
+		).Scan(&credential.CloneURL, &ownerUserID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("resolve worker GitHub repository: %w", err)
+		}
+		if ownerUserID == nil {
+			return ErrNotFound
+		}
+		credential.OwnerUserID = *ownerUserID
+		if _, err := tx.Exec(ctx, `SELECT set_config('ao.user_id', $1, true)`, credential.OwnerUserID); err != nil {
+			return err
+		}
+		err := tx.QueryRow(ctx,
+			`SELECT encrypted_secret, secret_nonce
+			FROM ao_user_provider_connections
+			WHERE user_id = $1
+			  AND provider = 'github'
+			  AND label = 'default'
+			  AND validation_state = 'valid'`,
+			credential.OwnerUserID,
+		).Scan(&credential.EncryptedSecret, &credential.Nonce)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("resolve worker GitHub PAT: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return domain.WorkerGitHubPAT{}, err
+	}
+	return credential, nil
 }
 
 // WorkerRemoteGitHubCheckoutContext returns only the encrypted production

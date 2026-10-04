@@ -3,6 +3,7 @@
 package conpty
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"io"
@@ -30,7 +31,7 @@ func TestMain(m *testing.M) {
 func TestLinuxPTYConnStreamsResizesAndReportsExit(t *testing.T) {
 	conn, err := newConPTY(t.TempDir(), "/bin/sh", []string{
 		"-c", `printf 'ready\n'; IFS= read -r line; printf 'received:%s\n' "$line"; exit 7`,
-	})
+	}, initialConPTYColumns, initialConPTYRows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,10 +55,19 @@ func TestLinuxPTYConnStreamsResizesAndReportsExit(t *testing.T) {
 		t.Fatal("Resize accepted a column count that overflows the Linux winsize")
 	}
 
+	reader := bufio.NewReader(conn)
+	ready, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("waiting for PTY readiness: %v", err)
+	}
+	if normalized := strings.ReplaceAll(ready, "\r", ""); normalized != "ready\n" {
+		t.Fatalf("PTY readiness output = %q", normalized)
+	}
+
 	outputC := make(chan []byte, 1)
 	go func() {
 		var output bytes.Buffer
-		_, _ = io.Copy(&output, conn)
+		_, _ = io.Copy(&output, reader)
 		outputC <- output.Bytes()
 	}()
 	if _, err := conn.Write([]byte("hello\n")); err != nil {
@@ -76,7 +86,7 @@ func TestLinuxPTYConnStreamsResizesAndReportsExit(t *testing.T) {
 
 	select {
 	case output := <-outputC:
-		text := strings.ReplaceAll(string(output), "\r", "")
+		text := strings.ReplaceAll(ready+string(output), "\r", "")
 		if !strings.Contains(text, "ready\n") || !strings.Contains(text, "received:hello\n") {
 			t.Fatalf("PTY output = %q", text)
 		}
@@ -90,7 +100,7 @@ func TestLinuxDefaultSpawnHostEndToEnd(t *testing.T) {
 	addr, hostPID, err := defaultSpawnHost(ctx, "spawn-e2e", t.TempDir(), []string{
 		"env", "AO_PREFIX_VALUE=prefix", "/bin/sh", "-c",
 		`printf '\033[c'; sleep 0.05; printf 'ready:%s:%s\n' "$AO_DIRECT_PTY_TEST" "$AO_PREFIX_VALUE"; IFS= read -r line; printf 'received:%s\n' "$line"; sleep 30`,
-	}, map[string]string{"AO_DIRECT_PTY_TEST": "works"})
+	}, map[string]string{"AO_DIRECT_PTY_TEST": "works"}, false)
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -141,7 +151,7 @@ func TestLinuxDefaultSpawnHostEndToEnd(t *testing.T) {
 func TestLinuxPTYCloseReapsTermIgnoringProcessGroup(t *testing.T) {
 	conn, err := newConPTY(t.TempDir(), "/bin/sh", []string{
 		"-c", `trap '' TERM; (trap '' TERM; printf 'child-ready\n'; sleep 30) & wait`,
-	})
+	}, initialConPTYColumns, initialConPTYRows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +185,7 @@ func TestLinuxPTYCloseReapsTermIgnoringProcessGroup(t *testing.T) {
 func TestLinuxPTYCloseReapsOrphanedBackgroundJobWhenLeaderExitsEarly(t *testing.T) {
 	conn, err := newConPTY(t.TempDir(), "/bin/sh", []string{
 		"-c", `printf 'bg-ready\n'; (trap '' HUP; sleep 30) & sleep 0.05; exit 0`,
-	})
+	}, initialConPTYColumns, initialConPTYRows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +228,7 @@ func TestLinuxPTYCloseReapsOrphanedBackgroundJobWhenLeaderExitsEarly(t *testing.
 func TestLinuxPTYCloseReapsDescendantWithOwnProcessGroup(t *testing.T) {
 	conn, err := newConPTY(t.TempDir(), "/bin/bash", []string{
 		"-c", `set -m; (trap '' TERM HUP; printf 'pg-child-ready\n'; sleep 30) & wait`,
-	})
+	}, initialConPTYColumns, initialConPTYRows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +312,7 @@ func TestLinuxPTYCloseDoesNotKillUnrelatedProcessAfterPIDReuse(t *testing.T) {
 func TestLinuxPTYCloseDelayedAfterFullSessionExit(t *testing.T) {
 	conn, err := newConPTY(t.TempDir(), "/bin/sh", []string{
 		"-c", `printf 'done\n'; exit 0`,
-	})
+	}, initialConPTYColumns, initialConPTYRows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,9 +411,13 @@ func TestLinuxRuntimeDestroyReapsTermIgnoringProcessTreeEndToEnd(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	sess := runtime.resolve(handle.ID)
+	sess, err := runtime.resolveWithEvidence(context.Background(), handle.ID)
+	if err != nil {
+		t.Fatalf("resolve session: %v", err)
+	}
 	if sess == nil {
 		t.Fatal("session not found in runtime")
+		return
 	}
 	hostPID := sess.pid
 
@@ -490,7 +504,7 @@ func TestLinuxPTYCloseReapsLateChildSpawnedInTERMHandler(t *testing.T) {
 	// in the same session and exits immediately (0.05s).
 	conn, err := newConPTY(t.TempDir(), "/bin/bash", []string{
 		"-c", `trap 'sleep 30 & exit 0' TERM; printf 'trap-ready\n'; while true; do sleep 1; done`,
-	})
+	}, initialConPTYColumns, initialConPTYRows)
 	if err != nil {
 		t.Fatal(err)
 	}

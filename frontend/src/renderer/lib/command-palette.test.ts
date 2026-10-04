@@ -13,7 +13,13 @@ import {
 	type CommandItem,
 } from "./command-palette";
 import type { PRReviewState } from "./session-reviews";
-import type { PullRequestFacts, WorkspaceSession, WorkspaceSummary } from "../types/workspace";
+import {
+	STANDALONE_PROJECT_KIND,
+	STANDALONE_WORKSPACE_ID,
+	type PullRequestFacts,
+	type WorkspaceSession,
+	type WorkspaceSummary,
+} from "../types/workspace";
 import { appI18n } from "../i18n";
 
 function session(overrides: Partial<WorkspaceSession> & { id: string }): WorkspaceSession {
@@ -128,6 +134,13 @@ describe("buildCommands grouping", () => {
 		rows[0].sessions.push(session({ id: "proj-1-orchestrator", title: "legacy orch", branch: "main" }));
 		const items = buildCommands({ workspaces: rows, currentSessionId: "proj-1-orchestrator" });
 		expect(byId(items).has("current-copy-branch")).toBe(false);
+	});
+});
+
+describe("buildCommands global", () => {
+	it("offers a Go to home command that navigates to the root route", () => {
+		const home = buildCommands({ workspaces: [] }).find((item) => item.id === "global-home");
+		expect(home).toMatchObject({ group: "global", action: { kind: "navigate", target: { to: "/" } } });
 	});
 });
 
@@ -611,6 +624,24 @@ describe("buildSessionActions", () => {
 		expect(items[0].action).toEqual({
 			kind: "navigate",
 			target: { to: "/projects/$projectId/sessions/$sessionId", params: { projectId: "proj-1", sessionId: "live" } },
+		});
+	});
+
+	it("routes a standalone session through the projectless session route", () => {
+		const standaloneWorkspace: WorkspaceSummary = {
+			id: STANDALONE_WORKSPACE_ID,
+			name: "Standalone agents",
+			kind: STANDALONE_PROJECT_KIND,
+			path: "",
+			sessions: [],
+		};
+		const items = buildSessionActions(
+			standaloneWorkspace,
+			session({ id: "standalone-1", workspaceId: "", workspaceName: "Standalone agents", branch: undefined }),
+		);
+		expect(items[0].action).toEqual({
+			kind: "navigate",
+			target: { to: "/sessions/$sessionId", params: { sessionId: "standalone-1" } },
 		});
 	});
 

@@ -45,8 +45,9 @@ const (
 	ClientElevenX = "eleven_x"
 
 	// defaultCloudControlPlaneURL is the control plane a build talks to when no
-	// override is set. Staging while the offering is in its dogfooding phase.
-	defaultCloudControlPlaneURL = "https://staging-api.aoagents.dev"
+	// override is set. Production, now that the hosted offering is live;
+	// AO_CLOUD_CONTROL_PLANE_URL still overrides it (e.g. staging-api for dev).
+	defaultCloudControlPlaneURL = "https://api.aoagents.dev"
 )
 
 // TelemetryRemote selects the remote telemetry exporter.
@@ -61,11 +62,15 @@ const (
 
 // TelemetryConfig controls local and remote telemetry behavior.
 type TelemetryConfig struct {
-	Events      bool
-	Metrics     bool
-	Remote      TelemetryRemote
-	PostHogKey  string
-	PostHogHost string
+	Events bool
+	// EventsExplicit distinguishes an operator/supervisor choice from the
+	// default. A missing policy file may use a boot-scoped headless token only
+	// when AO_TELEMETRY_EVENTS was explicitly set to on.
+	EventsExplicit bool
+	Metrics        bool
+	Remote         TelemetryRemote
+	PostHogKey     string
+	PostHogHost    string
 	// DisabledEvents names event streams that must never reach the remote
 	// (billed) sink. This is the kill switch: a stream that turns out to be
 	// noisy or expensive can be silenced by configuration, without waiting for
@@ -99,9 +104,10 @@ type GitLabConfig struct {
 }
 
 // DefaultAllowedOrigins are the browser origins the daemon's CORS boundary
-// trusts, beyond loopback-served content (which the middleware always trusts —
-// local pages can reach the no-auth daemon directly anyway). The daemon has no
-// auth, so every entry must be an origin web content cannot present:
+// trusts. General routes additionally admit loopback-served content, while
+// credential-management routes accept only this exact list (plus native
+// callers without an Origin header). The daemon has no auth, so every default
+// entry must be an origin ordinary web content cannot present:
 // app://renderer is the packaged Electron renderer, served from a custom
 // scheme only the desktop app registers — no website can bear it. The opaque
 // "null" origin (file:// pages, sandboxed iframes on any website) must never
@@ -127,17 +133,16 @@ type Config struct {
 	// DataDir is the directory holding durable SQLite state: DB and WAL files.
 	// It is created on first use by the storage layer.
 	DataDir string
+	// StateDir is the root for non-SQLite AO state. It defaults to ~/.ao. When
+	// AO_DATA_DIR is explicitly set, that override is also the state root so an
+	// isolated daemon never leaks account state into the default home.
+	StateDir string
 	// Agent is the compatibility agent adapter id selected by AO_AGENT;
 	// startSession fails fast if no adapter with this id is registered.
 	Agent string
-	// AppRunID identifies one desktop-app launch. The Electron supervisor mints
-	// it and passes it down (AO_APP_RUN_ID), holding it constant across daemon
-	// restarts it performs, so standalone shell terminals can survive a daemon
-	// restart while still being reaped when the APP itself goes away.
-	//
-	// Empty means no supervising app (a bare `ao daemon`): the daemon mints a
-	// fresh id per boot, which correctly makes any surviving shell terminals
-	// from an earlier run look like orphans and get cleaned up.
+	// AppRunID identifies one desktop-app launch and scopes transient command
+	// terminals to it. User shells survive across launches. The supervisor keeps
+	// this constant across daemon restarts; bare daemons mint a fresh id per boot.
 	AppRunID string
 	// AllowedOrigins are the browser origins granted CORS read access (see
 	// DefaultAllowedOrigins). Overridden by AO_ALLOWED_ORIGINS.
@@ -151,6 +156,9 @@ type Config struct {
 	// GitLab carries the self-managed GitLab host allowlist and per-host
 	// token overrides, loaded once at boot from environment variables.
 	GitLab GitLabConfig
+	// TrackerIntake gates the issue-intake observer daemon-wide
+	// (AO_TRACKER_INTAKE).
+	TrackerIntake bool
 	// Client identifies which client this deployment serves (AO_CLIENT). Empty
 	// means no client identity, which keeps client-gated offerings off.
 	Client string
@@ -277,12 +285,13 @@ func Load() (Config, error) {
 		cfg.AllowedOrigins = origins
 	}
 
-	if raw := os.Getenv("AO_TELEMETRY_EVENTS"); raw != "" {
+	if raw, present := os.LookupEnv("AO_TELEMETRY_EVENTS"); present && strings.TrimSpace(raw) != "" {
 		v, err := parseToggleEnv("AO_TELEMETRY_EVENTS", raw)
 		if err != nil {
 			return Config{}, err
 		}
 		cfg.Telemetry.Events = v
+		cfg.Telemetry.EventsExplicit = true
 	}
 	if raw := os.Getenv("AO_TELEMETRY_METRICS"); raw != "" {
 		v, err := parseToggleEnv("AO_TELEMETRY_METRICS", raw)
@@ -334,6 +343,14 @@ func Load() (Config, error) {
 		cfg.GitLab.HostTokens = tokens
 	}
 
+	if raw, ok := os.LookupEnv("AO_TRACKER_INTAKE"); ok && strings.TrimSpace(raw) != "" {
+		v, err := parseToggleEnv("AO_TRACKER_INTAKE", raw)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.TrackerIntake = v
+	}
+
 	if raw := os.Getenv("AO_CLIENT"); raw != "" {
 		cfg.Client = strings.TrimSpace(raw)
 	}
@@ -375,6 +392,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.DataDir = dataDir
+	if raw, ok := os.LookupEnv("AO_DATA_DIR"); ok && raw != "" {
+		cfg.StateDir = dataDir
+	} else {
+		cfg.StateDir = filepath.Dir(dataDir)
+	}
 
 	return cfg, nil
 }

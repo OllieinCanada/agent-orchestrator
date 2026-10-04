@@ -53,8 +53,13 @@ func New() *Plugin {
 	return &Plugin{}
 }
 
+// EmitsSemanticMessageAcceptance reports that AO's Kilocode plugin includes
+// the accepted prompt text in its user-prompt-submit callback.
+func (p *Plugin) EmitsSemanticMessageAcceptance() bool { return true }
+
 var _ adapters.Adapter = (*Plugin)(nil)
 var _ ports.Agent = (*Plugin)(nil)
+var _ ports.SemanticMessageAcceptanceSignaler = (*Plugin)(nil)
 
 // Manifest returns the adapter's static self-description.
 func (p *Plugin) Manifest() adapters.Manifest {
@@ -287,12 +292,14 @@ func kilocodeAOAgentName(sessionID string) string {
 
 var kilocodeBinarySpec = binaryutil.BinarySpec{
 	Label:         "kilocode",
-	Names:         []string{"kilocode"},
-	WinNames:      []string{"kilocode.cmd", "kilocode.exe", "kilocode"},
-	UnixPaths:     []string{"/usr/local/bin/kilocode", "/opt/homebrew/bin/kilocode"},
-	UnixHomePaths: binaryutil.NodeManagedUnixHomePaths("kilocode"),
+	Names:         []string{"kilo", "kilocode"},
+	WinNames:      []string{"kilo.cmd", "kilo.exe", "kilo", "kilocode.cmd", "kilocode.exe", "kilocode"},
+	UnixPaths:     []string{"/usr/local/bin/kilo", "/opt/homebrew/bin/kilo", "/usr/local/bin/kilocode", "/opt/homebrew/bin/kilocode"},
+	UnixHomePaths: append(binaryutil.NodeManagedUnixHomePaths("kilo"), binaryutil.NodeManagedUnixHomePaths("kilocode")...),
 	NodeManaged:   true,
 	WinPaths: []binaryutil.WinPath{
+		{Base: binaryutil.WinAppData, Parts: []string{"npm", "kilo.cmd"}},
+		{Base: binaryutil.WinAppData, Parts: []string{"npm", "kilo.exe"}},
 		{Base: binaryutil.WinAppData, Parts: []string{"npm", "kilocode.cmd"}},
 		{Base: binaryutil.WinAppData, Parts: []string{"npm", "kilocode.exe"}},
 	},

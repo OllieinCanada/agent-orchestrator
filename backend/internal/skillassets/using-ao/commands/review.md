@@ -8,7 +8,32 @@ Manage AO code reviews of a worker's PR.
 ao review <subcommand> [args] [flags]
 ```
 
+The review loop can be inspected, submitted, cancelled, or triggered again.
+
 ## Subcommands
+
+---
+
+### ao review ls
+
+List review runs for a worker session. Alias: `list`.
+
+**Syntax:**
+```
+ao review ls <worker-session-id> [flags]
+```
+
+**Flags:**
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--json` | Output reviews as JSON | - |
+
+**Example:**
+
+```bash
+ao review ls mer-3
+```
 
 ---
 
@@ -32,7 +57,13 @@ ao review submit [worker-session-id] [flags]
 | `--session string` | Worker session id (or pass it as the positional argument) | - |
 | `--verdict string` | Review verdict: `approved` or `changes_requested` | Required |
 
-## Examples
+If the local daemon is restarting when a result is submitted, AO retains the
+parsed result in memory and retries the same idempotent request for up to 30
+seconds. Validation errors return immediately. If the daemon remains unavailable,
+the command reports failure and can be repeated safely; daemon idempotency
+handles the case where an earlier connection dropped after committing the result.
+
+**Examples:**
 
 ```bash
 # Submit an approved review for session mer-3
@@ -42,4 +73,50 @@ ao review submit mer-3 --run review-run-1 --verdict approved
 ```bash
 # Submit a changes-requested review with a body from stdin
 echo "Please fix the null check on line 42." | ao review submit --session mer-3 --run review-run-1 --verdict changes_requested --body -
+```
+
+---
+
+### ao review cancel
+
+Cancel any running review for a worker's PR. Alias: `stop`.
+
+**Syntax:**
+```
+ao review cancel [worker-session-id] [flags]
+```
+
+**Flags:**
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--session string` | Worker session id (or pass it positionally) | - |
+
+**Example:**
+
+```bash
+ao review cancel mer-3
+```
+
+---
+
+### ao review trigger
+
+Trigger a new review pass for a worker's PR. Aliases: `execute`, `restart`.
+
+**Syntax:**
+```
+ao review trigger [worker-session-id] [flags]
+```
+
+**Flags:**
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--session string` | Worker session id (or pass it positionally) | - |
+
+**Example:**
+
+```bash
+ao review trigger mer-3
 ```

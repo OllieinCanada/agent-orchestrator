@@ -93,7 +93,7 @@ func derivePRKanbanColumn(session KanbanSessionFacts, pr KanbanPRFacts) KanbanCo
 		return KanbanReady
 	case pr.Draft:
 		return KanbanValidating
-	case externallyApproved(pr) || pr.Mergeability == MergeMergeable:
+	case externallyApproved(pr):
 		return KanbanReady
 	case aoOwnsNextStep(session, pr):
 		return KanbanValidating
@@ -106,6 +106,8 @@ func derivePRKanbanColumn(session KanbanSessionFacts, pr KanbanPRFacts) KanbanCo
 	// release the PR from Validating -- see aoOwnsNextStep above.
 	case session.AutoReview && !approvedByAO(pr):
 		return KanbanValidating
+	case pr.Mergeability == MergeMergeable:
+		return KanbanReady
 	// Fallthrough: the PR is in its review cycle and no AO loop is turning it,
 	// so the next turn is a person's -- give the review, answer the feedback
 	// already on it, or decide what to do about a failing check.
@@ -198,6 +200,7 @@ const (
 	DisplayNeedsReview        DisplayStatus = "Needs review"
 	DisplayReviewScheduled    DisplayStatus = "Review scheduled"
 	DisplayReviewing          DisplayStatus = "Reviewing"
+	DisplayReviewFailed       DisplayStatus = "Review failed"
 	DisplayReviewPending      DisplayStatus = "Review pending"
 	DisplayDraft              DisplayStatus = "Draft"
 	// In review.
@@ -274,9 +277,9 @@ func displayStatusInColumn(
 ) DisplayStatus {
 	switch column {
 	case KanbanValidating:
-		return validatingDisplayStatus(session, pr)
+		return validatingDisplayStatus(session, pr, now, noSignalGrace)
 	case KanbanNeedsReview:
-		return inReviewDisplayStatus(session, pr)
+		return inReviewDisplayStatus(session, pr, now, noSignalGrace)
 	case KanbanReady:
 		return readyDisplayStatus(pr)
 	default:
@@ -303,18 +306,23 @@ func buildingDisplayStatus(session KanbanSessionFacts, now time.Time, noSignalGr
 
 // validatingDisplayStatus reports the AO-driven loop turning the PR. A worker
 // that needs a person outranks the loop it was running, and the work AO is
-// doing outranks the review pass that asked for it.
-func validatingDisplayStatus(session KanbanSessionFacts, pr KanbanPRFacts) DisplayStatus {
+// doing outranks the review pass that asked for it. Crediting AO's auto-fix
+// loops requires the worker to actually be active right now: a stale
+// AutoInjectCI/AutoInjectReview flag on an idle worker falls through to the
+// plain CI/review-facts reading instead of claiming work nobody is doing.
+func validatingDisplayStatus(session KanbanSessionFacts, pr KanbanPRFacts, now time.Time, noSignalGrace time.Duration) DisplayStatus {
 	switch {
 	case session.Activity == ActivityBlocked || session.Activity == ActivityWaitingInput:
 		return DisplayBlocked
 	case session.Activity == ActivityExited:
 		return DisplayExited
-	case pr.CI == CIFailing && session.AutoInjectCI:
+	case silentPastGrace(session.SessionFacts, now, noSignalGrace):
+		return DisplayNoSignal
+	case pr.CI == CIFailing && session.AutoInjectCI && session.Activity == ActivityActive:
 		return DisplayFixingCI
 	case pr.CI == CIFailing:
 		return DisplayCIFailing
-	case changesRequestedOn(pr) && session.AutoInjectReview:
+	case changesRequestedOn(pr) && session.AutoInjectReview && session.Activity == ActivityActive:
 		return DisplayAddressingComments
 	case pr.ReviewRun.ChangesRequested:
 		return DisplayNeedsReview
@@ -323,7 +331,7 @@ func validatingDisplayStatus(session KanbanSessionFacts, pr KanbanPRFacts) Displ
 	case pr.ReviewRun.Running:
 		return DisplayReviewing
 	case pr.ReviewRun.Failed:
-		return DisplayNeedsReview
+		return DisplayReviewFailed
 	case pr.ReviewRun.Cancelled:
 		return DisplayReviewPending
 	case pr.Draft:
@@ -339,16 +347,25 @@ func validatingDisplayStatus(session KanbanSessionFacts, pr KanbanPRFacts) Displ
 // this ever runs -- so these guards do not change today's output. They stay
 // here, matching validatingDisplayStatus's shape, so this function reports the
 // AO-policy phrase correctly on its own rather than depending on a rule
-// enforced in a different function for its correctness.
-func inReviewDisplayStatus(session KanbanSessionFacts, pr KanbanPRFacts) DisplayStatus {
+// enforced in a different function for its correctness. A dead or idle worker
+// outranks all of it: crediting AO's auto-fix loop requires the worker to
+// actually be active right now, and a stale flag on an idle worker falls
+// through to the plain CI/review-facts reading below.
+func inReviewDisplayStatus(session KanbanSessionFacts, pr KanbanPRFacts, now time.Time, noSignalGrace time.Duration) DisplayStatus {
 	switch {
-	case pr.CI == CIFailing && session.AutoInjectCI:
+	case session.Activity == ActivityBlocked || session.Activity == ActivityWaitingInput:
+		return DisplayBlocked
+	case session.Activity == ActivityExited:
+		return DisplayExited
+	case silentPastGrace(session.SessionFacts, now, noSignalGrace):
+		return DisplayNoSignal
+	case pr.CI == CIFailing && session.AutoInjectCI && session.Activity == ActivityActive:
 		return DisplayFixingCI
 	case pr.CI == CIFailing:
 		return DisplayCIFailing
-	case pr.ExternalReview.Comments && session.AutoInjectReview:
+	case pr.ExternalReview.Comments && session.AutoInjectReview && session.Activity == ActivityActive:
 		return DisplayAddressingComments
-	case pr.ExternalReview.ChangesRequested && session.AutoInjectReview:
+	case pr.ExternalReview.ChangesRequested && session.AutoInjectReview && session.Activity == ActivityActive:
 		return DisplayAddressingComments
 	case pr.ExternalReview.ChangesRequested:
 		return DisplayChangesRequested

@@ -7,12 +7,15 @@ import {
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { OPEN_BROWSER_OVERLAY_SELECTOR } from "../lib/dom-selectors";
+import { aoBridge } from "../lib/bridge";
 
 type Listener = (state: BrowserNavState) => void;
 type TabsListener = (state: import("../../main/browser-view-host").BrowserTabsState) => void;
 type DevToolsListener = (state: import("../../main/browser-view-host").BrowserDevToolsState) => void;
 type ActivityListener = (state: import("../../main/browser-view-host").BrowserAgentActivityState) => void;
 type ProfileListener = (state: import("../../shared/browser-profiles").BrowserProfileViewState) => void;
+type AnnotationStateListener = (state: import("../../shared/browser-annotations").BrowserAnnotationStatePayload) => void;
 
 function createSlot(rect: Partial<DOMRect> = {}) {
 	const slot = document.createElement("div");
@@ -38,6 +41,7 @@ function setupBridge() {
 	const devtoolsListeners = new Set<DevToolsListener>();
 	const activityListeners = new Set<ActivityListener>();
 	const profileListeners = new Set<ProfileListener>();
+	const annotationStateListeners = new Set<AnnotationStateListener>();
 	const bridge = {
 		nativeCompositionEnabled: false,
 		stateFor(viewId: string): BrowserNavState {
@@ -59,6 +63,7 @@ function setupBridge() {
 			isLoading: false,
 		})),
 		setBounds: vi.fn(),
+		onBoundsApplied: vi.fn(() => () => undefined),
 		setOverlayOpen: vi.fn(),
 		navigate: vi.fn(async ({ viewId }: { viewId: string }) => bridge.stateFor(viewId)),
 		clear: vi.fn(async (viewId: string) => bridge.stateFor(viewId)),
@@ -74,18 +79,37 @@ function setupBridge() {
 		selectTab: vi.fn(async ({ viewId, tabId }: { viewId: string; tabId: string }) => ({
 			viewId,
 			activeTabId: tabId,
-			tabs: [{ id: tabId, url: "http://localhost:4173/", title: "Selected", active: true }],
+			tabs: [
+				{
+					id: tabId,
+					url: "http://localhost:4173/",
+					title: "Selected",
+					active: true,
+				},
+			],
 		})),
 		closeTab: vi.fn(async ({ viewId }: { viewId: string; tabId: string }) => ({
 			viewId,
 			activeTabId: "t1",
-			tabs: [{ id: "t1", url: "http://localhost:3000/", title: "First", active: true }],
+			tabs: [
+				{
+					id: "t1",
+					url: "http://localhost:3000/",
+					title: "First",
+					active: true,
+				},
+			],
 		})),
 		openTab: vi.fn(async ({ viewId }: { viewId: string; url?: string }) => ({
 			viewId,
 			activeTabId: "t2",
 			tabs: [
-				{ id: "t1", url: "http://localhost:3000/", title: "First", active: false },
+				{
+					id: "t1",
+					url: "http://localhost:3000/",
+					title: "First",
+					active: false,
+				},
 				{ id: "t2", url: "", title: "", active: true },
 			],
 		})),
@@ -105,11 +129,27 @@ function setupBridge() {
 				placement: placement ?? "undocked",
 			}),
 		),
-		getProfile: vi.fn(async (viewId: string) => ({ viewId, profileId: null, temporary: true })),
+		getProfile: vi.fn(async (viewId: string) => ({
+			viewId,
+			profileId: null,
+			temporary: true,
+		})),
 		showProfileMenu: vi.fn(),
+		selectProfile: vi.fn(),
 		historySuggestions: vi.fn(async () => []),
+		historyFavicon: vi.fn(async () => undefined),
+		captureScreenshot: vi.fn(async () => undefined),
+		downloads: {
+			list: vi.fn(async () => ({ downloads: [] })),
+			action: vi.fn(async () => ({ downloads: [] })),
+			clear: vi.fn(async () => ({ downloads: [] })),
+			onChanged: vi.fn(() => () => { /* no-op test subscription */ }),
+		},
 		destroy: vi.fn(),
 		setAnnotationMode: vi.fn(async () => undefined),
+		completeAnnotation: vi.fn(async () => undefined),
+		discardAnnotations: vi.fn(async () => undefined),
+		annotationAction: vi.fn(async () => undefined),
 		onNavState: vi.fn((listener: Listener) => {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
@@ -134,6 +174,10 @@ function setupBridge() {
 		onProfileManage: vi.fn(() => () => undefined),
 		onAnnotationSubmit: vi.fn(() => () => undefined),
 		onAnnotationCancel: vi.fn(() => () => undefined),
+		onAnnotationState: vi.fn((listener: AnnotationStateListener) => {
+			annotationStateListeners.add(listener);
+			return () => annotationStateListeners.delete(listener);
+		}),
 		emit(state: BrowserNavState) {
 			listeners.forEach((listener) => listener(state));
 		},
@@ -148,6 +192,9 @@ function setupBridge() {
 		},
 		emitProfile(state: Parameters<ProfileListener>[0]) {
 			profileListeners.forEach((listener) => listener(state));
+		},
+		emitAnnotationState(state: Parameters<AnnotationStateListener>[0]) {
+			annotationStateListeners.forEach((listener) => listener(state));
 		},
 	};
 	window.ao = { ...window.ao!, browser: bridge };
@@ -194,13 +241,41 @@ describe("useBrowserView", () => {
 		act(() => result.current.slotRef(slot));
 
 		await waitFor(() =>
-			expect(bridge.setBounds).toHaveBeenCalledWith({
+			expect(bridge.setBounds).toHaveBeenCalledWith(expect.objectContaining({
 				viewId: "42:sess-1",
 				rect: { x: 12, y: 34, width: 320, height: 240 },
 				visible: true,
-			}),
+			})),
 		);
+		const revisions = bridge.setBounds.mock.calls.map(([input]) => input.revision);
+		expect(
+			revisions.every(
+				(revision, index) => Number.isSafeInteger(revision) && (index === 0 || revision > revisions[index - 1]!),
+			),
+		).toBe(true);
 		expect(result.current.viewId).toBe("42:sess-1");
+	});
+
+	it("keeps bounds revisions increasing when the same native view remounts", async () => {
+		const bridge = setupBridge();
+		const firstSlot = createSlot();
+		const first = renderHook(() => useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false }));
+
+		await waitFor(() => expect(first.result.current.viewId).toBe("42:sess-1"));
+		act(() => first.result.current.slotRef(firstSlot));
+		await waitFor(() => expect(bridge.setBounds).toHaveBeenCalled());
+		first.unmount();
+		const firstRevision = Math.max(...bridge.setBounds.mock.calls.map(([input]) => input.revision));
+
+		bridge.setBounds.mockClear();
+		const secondSlot = createSlot();
+		const second = renderHook(() => useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false }));
+		await waitFor(() => expect(second.result.current.viewId).toBe("42:sess-1"));
+		act(() => second.result.current.slotRef(secondSlot));
+		await waitFor(() => expect(bridge.setBounds).toHaveBeenCalled());
+
+		expect(bridge.setBounds.mock.calls.every(([input]) => input.revision > firstRevision)).toBe(true);
+		second.unmount();
 	});
 
 	it("keeps an active blank target live", async () => {
@@ -212,12 +287,45 @@ describe("useBrowserView", () => {
 		act(() => result.current.slotRef(slot));
 
 		await waitFor(() =>
-			expect(bridge.setBounds).toHaveBeenCalledWith({
+			expect(bridge.setBounds).toHaveBeenCalledWith(expect.objectContaining({
 				viewId: "42:sess-1",
 				rect: { x: 12, y: 34, width: 320, height: 240 },
 				visible: true,
-			}),
+			})),
 		);
+	});
+
+	it("restores native bounds synchronously when React hands the slot to a new host", async () => {
+		const bridge = setupBridge();
+		const dockedSlot = createSlot();
+		const expandedSlot = createSlot();
+		vi.spyOn(expandedSlot, "getBoundingClientRect").mockReturnValue({
+			x: 8,
+			y: 48,
+			top: 48,
+			right: 1192,
+			bottom: 748,
+			left: 8,
+			width: 1184,
+			height: 700,
+			toJSON: () => ({}),
+		});
+		const { result } = renderHook(() => useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false }));
+
+		await waitFor(() => expect(result.current.viewId).toBe("42:sess-1"));
+		act(() => result.current.slotRef(dockedSlot));
+		bridge.setBounds.mockClear();
+
+		act(() => {
+			result.current.slotRef(null);
+			result.current.slotRef(expandedSlot);
+		});
+
+		expect(bridge.setBounds).toHaveBeenLastCalledWith(expect.objectContaining({
+			viewId: "42:sess-1",
+			rect: { x: 8, y: 48, width: 1184, height: 700 },
+			visible: true,
+		}));
 	});
 
 	it("tracks popup tabs and routes manual select and close actions", async () => {
@@ -230,8 +338,18 @@ describe("useBrowserView", () => {
 				viewId: "42:sess-1",
 				activeTabId: "t2",
 				tabs: [
-					{ id: "t1", url: "http://localhost:3000/", title: "First", active: false },
-					{ id: "t2", url: "http://localhost:4173/", title: "Popup", active: true },
+					{
+						id: "t1",
+						url: "http://localhost:3000/",
+						title: "First",
+						active: false,
+					},
+					{
+						id: "t2",
+						url: "http://localhost:4173/",
+						title: "Popup",
+						active: true,
+					},
 				],
 				change: { kind: "popup", tabId: "t2" },
 			}),
@@ -241,9 +359,57 @@ describe("useBrowserView", () => {
 		expect(result.current.tabNotice).toBe("Opened new tab");
 
 		await act(() => result.current.selectTab("t1"));
-		expect(bridge.selectTab).toHaveBeenCalledWith({ viewId: "42:sess-1", tabId: "t1" });
+		expect(bridge.selectTab).toHaveBeenCalledWith({
+			viewId: "42:sess-1",
+			tabId: "t1",
+		});
 		await act(() => result.current.closeTab("t2"));
-		expect(bridge.closeTab).toHaveBeenCalledWith({ viewId: "42:sess-1", tabId: "t2" });
+		expect(bridge.closeTab).toHaveBeenCalledWith({
+			viewId: "42:sess-1",
+			tabId: "t2",
+		});
+	});
+
+	it("reuses the active blank tab when opening a chat link", async () => {
+		const bridge = setupBridge();
+		const { result } = renderHook(() => useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false }));
+
+		await waitFor(() => expect(result.current.tabs.map((tab) => tab.id)).toEqual(["t1"]));
+		await act(() => result.current.openLink("http://localhost:5173/"));
+
+		expect(bridge.navigate).toHaveBeenCalledWith({ viewId: "42:sess-1", url: "http://localhost:5173/" });
+		expect(bridge.openTab).not.toHaveBeenCalledWith({ viewId: "42:sess-1", url: "http://localhost:5173/" });
+	});
+
+	it("selects an existing matching tab instead of opening a duplicate", async () => {
+		const bridge = setupBridge();
+		const { result } = renderHook(() => useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false }));
+
+		await waitFor(() => expect(result.current.tabs.map((tab) => tab.id)).toEqual(["t1"]));
+		act(() => bridge.emitTabs({
+			viewId: "42:sess-1",
+			activeTabId: "t2",
+			tabs: [
+				{ id: "t1", url: "https://instagram.com/", title: "Instagram", active: false },
+				{ id: "t2", url: "https://example.com/", title: "Example", active: true },
+			],
+			change: { kind: "popup", tabId: "t2" },
+		}));
+		bridge.getTabs.mockResolvedValue({
+			viewId: "42:sess-1",
+			activeTabId: "t2",
+			tabs: [
+				{ id: "t1", url: "https://instagram.com/", title: "Instagram", active: false },
+				{ id: "t2", url: "https://example.com/", title: "Example", active: true },
+			],
+		});
+
+		await act(() => result.current.openLink("https://www.instagram.com/#inbox"));
+		expect(bridge.selectTab).toHaveBeenCalledWith({ viewId: "42:sess-1", tabId: "t1" });
+		expect(bridge.openTab).not.toHaveBeenCalledWith({
+			viewId: "42:sess-1",
+			url: "https://www.instagram.com/#inbox",
+		});
 	});
 
 	it("remembers a closed tab so it can be reopened, and forgets it once reopened", async () => {
@@ -256,18 +422,38 @@ describe("useBrowserView", () => {
 				viewId: "42:sess-1",
 				activeTabId: "t2",
 				tabs: [
-					{ id: "t1", url: "http://localhost:3000/", title: "First", active: false },
-					{ id: "t2", url: "http://localhost:4173/", title: "Second", active: true },
+					{
+						id: "t1",
+						url: "http://localhost:3000/",
+						title: "First",
+						active: false,
+					},
+					{
+						id: "t2",
+						url: "http://localhost:4173/",
+						title: "Second",
+						active: true,
+					},
 				],
 				change: { kind: "popup", tabId: "t2" },
 			}),
 		);
 
 		await act(() => result.current.closeTab("t2"));
-		expect(result.current.closedTabs).toEqual([{ id: "t2", url: "http://localhost:4173/", title: "Second", favicon: undefined }]);
+		expect(result.current.closedTabs).toEqual([
+			{
+				id: "t2",
+				url: "http://localhost:4173/",
+				title: "Second",
+				favicon: undefined,
+			},
+		]);
 
 		await act(() => result.current.reopenClosedTab("t2"));
-		expect(bridge.openTab).toHaveBeenCalledWith({ viewId: "42:sess-1", url: "http://localhost:4173/" });
+		expect(bridge.openTab).toHaveBeenCalledWith({
+			viewId: "42:sess-1",
+			url: "http://localhost:4173/",
+		});
 		expect(result.current.closedTabs).toEqual([]);
 	});
 
@@ -280,20 +466,40 @@ describe("useBrowserView", () => {
 			bridge.emitTabs({
 				viewId: "42:sess-1",
 				activeTabId: "t1",
-				tabs: [{ id: "t1", url: "http://localhost:3000/", title: "First", active: true }],
+				tabs: [
+					{
+						id: "t1",
+						url: "http://localhost:3000/",
+						title: "First",
+						active: true,
+					},
+				],
 				change: {
 					kind: "closed",
 					tabId: "t2",
-					tab: { id: "t2", url: "http://localhost:4173/", title: "Keyboard closed", active: false },
+					tab: {
+						id: "t2",
+						url: "http://localhost:4173/",
+						title: "Keyboard closed",
+						active: false,
+					},
 				},
 			}),
 		);
 
 		expect(result.current.closedTabs).toEqual([
-			{ id: "t2", url: "http://localhost:4173/", title: "Keyboard closed", favicon: undefined },
+			{
+				id: "t2",
+				url: "http://localhost:4173/",
+				title: "Keyboard closed",
+				favicon: undefined,
+			},
 		]);
 		await act(() => result.current.reopenClosedTab("t2"));
-		expect(bridge.openTab).toHaveBeenCalledWith({ viewId: "42:sess-1", url: "http://localhost:4173/" });
+		expect(bridge.openTab).toHaveBeenCalledWith({
+			viewId: "42:sess-1",
+			url: "http://localhost:4173/",
+		});
 	});
 
 	it("can reopen a tab immediately after receiving its keyboard-close event", async () => {
@@ -305,17 +511,32 @@ describe("useBrowserView", () => {
 			bridge.emitTabs({
 				viewId: "42:sess-1",
 				activeTabId: "t1",
-				tabs: [{ id: "t1", url: "http://localhost:3000/", title: "First", active: true }],
+				tabs: [
+					{
+						id: "t1",
+						url: "http://localhost:3000/",
+						title: "First",
+						active: true,
+					},
+				],
 				change: {
 					kind: "closed",
 					tabId: "t2",
-					tab: { id: "t2", url: "http://localhost:4173/", title: "Keyboard closed", active: false },
+					tab: {
+						id: "t2",
+						url: "http://localhost:4173/",
+						title: "Keyboard closed",
+						active: false,
+					},
 				},
 			});
 			await result.current.reopenClosedTab("t2");
 		});
 
-		expect(bridge.openTab).toHaveBeenCalledWith({ viewId: "42:sess-1", url: "http://localhost:4173/" });
+		expect(bridge.openTab).toHaveBeenCalledWith({
+			viewId: "42:sess-1",
+			url: "http://localhost:4173/",
+		});
 	});
 
 	it("reopens a closed tab beyond the former tab cap", async () => {
@@ -328,8 +549,18 @@ describe("useBrowserView", () => {
 				viewId: "42:sess-1",
 				activeTabId: "t2",
 				tabs: [
-					{ id: "t1", url: "http://localhost:3000/", title: "First", active: false },
-					{ id: "t2", url: "http://localhost:4173/", title: "Second", active: true },
+					{
+						id: "t1",
+						url: "http://localhost:3000/",
+						title: "First",
+						active: false,
+					},
+					{
+						id: "t2",
+						url: "http://localhost:4173/",
+						title: "Second",
+						active: true,
+					},
 				],
 				change: { kind: "popup", tabId: "t2" },
 			}),
@@ -353,7 +584,10 @@ describe("useBrowserView", () => {
 
 		await act(() => result.current.reopenClosedTab("t2"));
 
-		expect(bridge.openTab).toHaveBeenCalledWith({ viewId: "42:sess-1", url: "http://localhost:4173/" });
+		expect(bridge.openTab).toHaveBeenCalledWith({
+			viewId: "42:sess-1",
+			url: "http://localhost:4173/",
+		});
 		expect(result.current.closedTabs).toHaveLength(0);
 	});
 
@@ -370,8 +604,18 @@ describe("useBrowserView", () => {
 				viewId: "42:sess-1",
 				activeTabId: "t2",
 				tabs: [
-					{ id: "t1", url: "http://localhost:3000/", title: "First", active: false },
-					{ id: "t2", url: "http://localhost:4173/", title: "Second", active: true },
+					{
+						id: "t1",
+						url: "http://localhost:3000/",
+						title: "First",
+						active: false,
+					},
+					{
+						id: "t2",
+						url: "http://localhost:4173/",
+						title: "Second",
+						active: true,
+					},
 				],
 				change: { kind: "popup", tabId: "t2" },
 			}),
@@ -417,8 +661,18 @@ describe("useBrowserView", () => {
 				viewId: "42:sess-1",
 				activeTabId: "t2",
 				tabs: [
-					{ id: "t1", url: "http://localhost:3000/", title: "First", active: false },
-					{ id: "t2", url: "http://localhost:4173/", title: "Second", active: true },
+					{
+						id: "t1",
+						url: "http://localhost:3000/",
+						title: "First",
+						active: false,
+					},
+					{
+						id: "t2",
+						url: "http://localhost:4173/",
+						title: "Second",
+						active: true,
+					},
 				],
 				change: { kind: "popup", tabId: "t2" },
 			}),
@@ -430,7 +684,14 @@ describe("useBrowserView", () => {
 		bridge.getTabs.mockResolvedValueOnce({
 			viewId: "42:sess-1",
 			activeTabId: "t1",
-			tabs: [{ id: "t1", url: "http://localhost:3000/", title: "First", active: true }],
+			tabs: [
+				{
+					id: "t1",
+					url: "http://localhost:3000/",
+					title: "First",
+					active: true,
+				},
+			],
 		});
 
 		await act(() => result.current.closeTab("t2"));
@@ -452,8 +713,18 @@ describe("useBrowserView", () => {
 				viewId: "42:sess-1",
 				activeTabId: "t2",
 				tabs: [
-					{ id: "t1", url: "http://localhost:3000/", title: "First", active: false },
-					{ id: "t2", url: "http://localhost:4173/", title: "Second", active: true },
+					{
+						id: "t1",
+						url: "http://localhost:3000/",
+						title: "First",
+						active: false,
+					},
+					{
+						id: "t2",
+						url: "http://localhost:4173/",
+						title: "Second",
+						active: true,
+					},
 				],
 				change: { kind: "popup", tabId: "t2" },
 			}),
@@ -463,8 +734,18 @@ describe("useBrowserView", () => {
 			viewId: "42:sess-1",
 			activeTabId: "t2",
 			tabs: [
-				{ id: "t1", url: "http://localhost:3000/", title: "First", active: false },
-				{ id: "t2", url: "http://localhost:4173/", title: "Second", active: true },
+				{
+					id: "t1",
+					url: "http://localhost:3000/",
+					title: "First",
+					active: false,
+				},
+				{
+					id: "t2",
+					url: "http://localhost:4173/",
+					title: "Second",
+					active: true,
+				},
 			],
 		});
 		await act(() => result.current.closeTab("t2"));
@@ -484,7 +765,12 @@ describe("useBrowserView", () => {
 				activeTabId: "t2",
 				tabs: [
 					{ id: "t1", url: "", title: "", active: false },
-					{ id: "t2", url: "http://localhost:4173/", title: "Second", active: true },
+					{
+						id: "t2",
+						url: "http://localhost:4173/",
+						title: "Second",
+						active: true,
+					},
 				],
 				change: { kind: "popup", tabId: "t2" },
 			}),
@@ -493,7 +779,14 @@ describe("useBrowserView", () => {
 		bridge.closeTab.mockResolvedValueOnce({
 			viewId: "42:sess-1",
 			activeTabId: "t2",
-			tabs: [{ id: "t2", url: "http://localhost:4173/", title: "Second", active: true }],
+			tabs: [
+				{
+					id: "t2",
+					url: "http://localhost:4173/",
+					title: "Second",
+					active: true,
+				},
+			],
 		});
 		await act(() => result.current.closeTab("t1"));
 		expect(result.current.closedTabs).toEqual([]);
@@ -515,7 +808,12 @@ describe("useBrowserView", () => {
 				activeTabId: "t2",
 				tabs: [
 					{ id: "t1", url: "about:blank", title: "", active: false },
-					{ id: "t2", url: "http://localhost:4173/", title: "Second", active: true },
+					{
+						id: "t2",
+						url: "http://localhost:4173/",
+						title: "Second",
+						active: true,
+					},
 				],
 				change: { kind: "popup", tabId: "t2" },
 			}),
@@ -524,7 +822,14 @@ describe("useBrowserView", () => {
 		bridge.closeTab.mockResolvedValueOnce({
 			viewId: "42:sess-1",
 			activeTabId: "t2",
-			tabs: [{ id: "t2", url: "http://localhost:4173/", title: "Second", active: true }],
+			tabs: [
+				{
+					id: "t2",
+					url: "http://localhost:4173/",
+					title: "Second",
+					active: true,
+				},
+			],
 		});
 		await act(() => result.current.closeTab("t1"));
 		expect(result.current.closedTabs).toEqual([]);
@@ -546,14 +851,31 @@ describe("useBrowserView", () => {
 				viewId: "42:sess-1",
 				activeTabId: "t2",
 				tabs: [
-					{ id: "t1", url: "http://localhost:3000/", title: "First", active: false },
-					{ id: "t2", url: "http://localhost:4173/", title: "Second", active: true },
+					{
+						id: "t1",
+						url: "http://localhost:3000/",
+						title: "First",
+						active: false,
+					},
+					{
+						id: "t2",
+						url: "http://localhost:4173/",
+						title: "Second",
+						active: true,
+					},
 				],
 				change: { kind: "popup", tabId: "t2" },
 			}),
 		);
 		await act(() => result.current.closeTab("t2"));
-		expect(result.current.closedTabs).toEqual([{ id: "t2", url: "http://localhost:4173/", title: "Second", favicon: undefined }]);
+		expect(result.current.closedTabs).toEqual([
+			{
+				id: "t2",
+				url: "http://localhost:4173/",
+				title: "Second",
+				favicon: undefined,
+			},
+		]);
 
 		rerender({ sessionId: "sess-2" });
 		await waitFor(() => expect(result.current.viewId).toBe("42:sess-2"));
@@ -561,13 +883,26 @@ describe("useBrowserView", () => {
 
 		rerender({ sessionId: "sess-1" });
 		await waitFor(() => expect(result.current.viewId).toBe("42:sess-1"));
-		expect(result.current.closedTabs).toEqual([{ id: "t2", url: "http://localhost:4173/", title: "Second", favicon: undefined }]);
+		expect(result.current.closedTabs).toEqual([
+			{
+				id: "t2",
+				url: "http://localhost:4173/",
+				title: "Second",
+				favicon: undefined,
+			},
+		]);
 	});
 
 	it("forgets a session's Recently Closed list once the session is genuinely terminated", async () => {
 		const bridge = setupBridge();
 		const { result, rerender } = renderHook(
-			({ terminated }) => useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false, terminated }),
+			({ terminated }) =>
+				useBrowserView({
+					sessionId: "sess-1",
+					active: true,
+					poppedOut: false,
+					terminated,
+				}),
 			{ initialProps: { terminated: false } },
 		);
 		await waitFor(() => expect(result.current.tabs.map((tab) => tab.id)).toEqual(["t1"]));
@@ -576,8 +911,18 @@ describe("useBrowserView", () => {
 				viewId: "42:sess-1",
 				activeTabId: "t2",
 				tabs: [
-					{ id: "t1", url: "http://localhost:3000/", title: "First", active: false },
-					{ id: "t2", url: "http://localhost:4173/", title: "Second", active: true },
+					{
+						id: "t1",
+						url: "http://localhost:3000/",
+						title: "First",
+						active: false,
+					},
+					{
+						id: "t2",
+						url: "http://localhost:4173/",
+						title: "Second",
+						active: true,
+					},
 				],
 				change: { kind: "popup", tabId: "t2" },
 			}),
@@ -613,11 +958,11 @@ describe("useBrowserView", () => {
 		);
 		act(() => result.current.slotRef(slot));
 		await waitFor(() =>
-			expect(bridge.setBounds).toHaveBeenCalledWith({
+			expect(bridge.setBounds).toHaveBeenCalledWith(expect.objectContaining({
 				viewId: "42:sess-1",
 				rect: { x: 12, y: 34, width: 320, height: 240 },
 				visible: true,
-			}),
+			})),
 		);
 		bridge.setBounds.mockClear();
 
@@ -626,11 +971,11 @@ describe("useBrowserView", () => {
 		});
 
 		await waitFor(() =>
-			expect(bridge.setBounds).toHaveBeenCalledWith({
+			expect(bridge.setBounds).toHaveBeenCalledWith(expect.objectContaining({
 				viewId: "42:sess-1",
 				rect: { x: 12, y: 34, width: 320, height: 240 },
 				visible: true,
-			}),
+			})),
 		);
 	});
 
@@ -671,14 +1016,14 @@ describe("useBrowserView", () => {
 		act(() => result.current.slotRef(slot));
 
 		await waitFor(() =>
-			expect(bridge.setBounds).toHaveBeenCalledWith({
+			expect(bridge.setBounds).toHaveBeenCalledWith(expect.objectContaining({
 				viewId: "42:sess-1",
 				// Left edge is inset by the resize handle's reserved 6px (see
 				// RESIZE_HANDLE_RESERVE_PX in useBrowserView.ts) so the handle's
 				// hit area, inside this same column, is never covered by the view.
 				rect: { x: 106, y: 34, width: 144, height: 240 },
 				visible: true,
-			}),
+			})),
 		);
 	});
 
@@ -740,7 +1085,9 @@ describe("useBrowserView", () => {
 				vi.advanceTimersByTime(300);
 			});
 			expect(bridge.setBounds).toHaveBeenCalledWith(
-				expect.objectContaining({ rect: expect.objectContaining({ x: 240, width: 320 }) }),
+				expect.objectContaining({
+					rect: expect.objectContaining({ x: 240, width: 320 }),
+				}),
 			);
 		} finally {
 			vi.useRealTimers();
@@ -759,19 +1106,19 @@ describe("useBrowserView", () => {
 
 		rerender({ active: false });
 		await waitFor(() =>
-			expect(bridge.setBounds).toHaveBeenLastCalledWith({
+			expect(bridge.setBounds).toHaveBeenLastCalledWith(expect.objectContaining({
 				viewId: "42:sess-1",
 				rect: { x: 0, y: 0, width: 0, height: 0 },
 				visible: false,
-			}),
+			})),
 		);
 
 		unmount();
-		expect(bridge.setBounds).toHaveBeenLastCalledWith({
+		expect(bridge.setBounds).toHaveBeenLastCalledWith(expect.objectContaining({
 			viewId: "42:sess-1",
 			rect: { x: 0, y: 0, width: 0, height: 0 },
 			visible: false,
-		});
+		}));
 		expect(bridge.destroy).not.toHaveBeenCalled();
 	});
 
@@ -793,11 +1140,11 @@ describe("useBrowserView", () => {
 		);
 		act(() => result.current.slotRef(slot));
 		await waitFor(() =>
-			expect(bridge.setBounds).toHaveBeenCalledWith({
+			expect(bridge.setBounds).toHaveBeenCalledWith(expect.objectContaining({
 				viewId: "42:sess-1",
 				rect: { x: 12, y: 34, width: 320, height: 240 },
 				visible: true,
-			}),
+			})),
 		);
 
 		bridge.setBounds.mockClear();
@@ -835,11 +1182,11 @@ describe("useBrowserView", () => {
 		);
 		act(() => result.current.slotRef(slot));
 		await waitFor(() =>
-			expect(bridge.setBounds).toHaveBeenCalledWith({
+			expect(bridge.setBounds).toHaveBeenCalledWith(expect.objectContaining({
 				viewId: "42:sess-1",
 				rect: { x: 12, y: 34, width: 320, height: 240 },
 				visible: true,
-			}),
+			})),
 		);
 
 		const menu = document.createElement("div");
@@ -901,11 +1248,11 @@ describe("useBrowserView", () => {
 		);
 		act(() => result.current.slotRef(slot));
 		await waitFor(() =>
-			expect(bridge.setBounds).toHaveBeenCalledWith({
+			expect(bridge.setBounds).toHaveBeenCalledWith(expect.objectContaining({
 				viewId: "42:sess-1",
 				rect: { x: 12, y: 34, width: 320, height: 240 },
 				visible: true,
-			}),
+			})),
 		);
 
 		const menu = document.createElement("div");
@@ -968,6 +1315,43 @@ describe("useBrowserView", () => {
 		await waitFor(() => expect(bridge.setOverlayOpen).toHaveBeenLastCalledWith(false));
 	});
 
+	it("does not raise the browser overlay during sidebar resize", async () => {
+		const bridge = setupBridge();
+		renderHook(() => useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false }));
+		await waitFor(() => expect(bridge.ensure).toHaveBeenCalledWith("sess-1"));
+		bridge.setOverlayOpen.mockClear();
+
+		await act(async () => {
+			document.body.classList.add("is-resizing-x");
+			await Promise.resolve();
+		});
+		expect(bridge.setOverlayOpen).not.toHaveBeenCalled();
+
+		await act(async () => {
+			document.body.classList.remove("is-resizing-x");
+			await Promise.resolve();
+		});
+		expect(bridge.setOverlayOpen).not.toHaveBeenCalled();
+	});
+
+	it("does not scan the document for unrelated data-state mutations", async () => {
+		const bridge = setupBridge();
+		renderHook(() => useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false }));
+		await waitFor(() => expect(bridge.ensure).toHaveBeenCalledWith("sess-1"));
+		const querySelector = vi.spyOn(document, "querySelector");
+
+		const unrelated = document.createElement("button");
+		unrelated.setAttribute("data-state", "closed");
+		document.body.appendChild(unrelated);
+		await act(async () => {
+			unrelated.setAttribute("data-state", "open");
+			await Promise.resolve();
+		});
+
+		expect(querySelector).not.toHaveBeenCalledWith(OPEN_BROWSER_OVERLAY_SELECTOR);
+		expect(bridge.setOverlayOpen).not.toHaveBeenCalled();
+	});
+
 	it("updates nav state only for the current view", async () => {
 		const bridge = setupBridge();
 		const { result } = renderHook(() => useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false }));
@@ -1013,7 +1397,11 @@ describe("useBrowserView", () => {
 		const bridge = setupBridge();
 		const observedUrls: string[] = [];
 		function useProbe(sid: string) {
-			const view = useBrowserView({ sessionId: sid, active: true, poppedOut: false });
+			const view = useBrowserView({
+				sessionId: sid,
+				active: true,
+				poppedOut: false,
+			});
 			useEffect(() => {
 				observedUrls.push(view.navState.url);
 			});
@@ -1045,12 +1433,26 @@ describe("useBrowserView", () => {
 		const bridge = setupBridge();
 		const { rerender } = renderHook(
 			({ previewUrl, previewRevision }) =>
-				useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false, previewUrl, previewRevision }),
-			{ initialProps: { previewUrl: "http://localhost:5173/", previewRevision: 1 } },
+				useBrowserView({
+					sessionId: "sess-1",
+					active: true,
+					poppedOut: false,
+					previewUrl,
+					previewRevision,
+				}),
+			{
+				initialProps: {
+					previewUrl: "http://localhost:5173/",
+					previewRevision: 1,
+				},
+			},
 		);
 
 		await waitFor(() =>
-			expect(bridge.navigate).toHaveBeenCalledWith({ viewId: "42:sess-1", url: "http://localhost:5173/" }),
+			expect(bridge.navigate).toHaveBeenCalledWith({
+				viewId: "42:sess-1",
+				url: "http://localhost:5173/",
+			}),
 		);
 		expect(bridge.navigate).toHaveBeenCalledTimes(1);
 
@@ -1065,11 +1467,58 @@ describe("useBrowserView", () => {
 		await waitFor(() => expect(bridge.navigate).toHaveBeenCalledTimes(2));
 
 		// A changed target with a fresh revision navigates to the new URL.
-		rerender({ previewUrl: "file:///tmp/preview/index.html", previewRevision: 3 });
+		rerender({
+			previewUrl: "file:///tmp/preview/index.html",
+			previewRevision: 3,
+		});
 		await waitFor(() =>
-			expect(bridge.navigate).toHaveBeenCalledWith({ viewId: "42:sess-1", url: "file:///tmp/preview/index.html" }),
+			expect(bridge.navigate).toHaveBeenCalledWith({
+				viewId: "42:sess-1",
+				url: "file:///tmp/preview/index.html",
+			}),
 		);
 		expect(bridge.navigate).toHaveBeenCalledTimes(3);
+	});
+
+	it("never opens a disconnected remote localhost preview on this machine", async () => {
+		const browser = setupBridge();
+		const resolve = vi.spyOn(aoBridge.remotes, "previewUrl").mockRejectedValueOnce(new Error("disconnected"))
+			.mockResolvedValue("http://ao-preview-abc.localhost:4000/");
+		vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const { rerender } = renderHook(({ proxyBase }) => useBrowserView({
+			sessionId: "remote:box-a:ao-1",
+			origin: { hostId: "box-a", sessionId: "ao-1", proxyBase },
+			active: true,
+			poppedOut: false,
+			previewUrl: "http://localhost:5173/",
+			previewRevision: 1,
+		}), { initialProps: { proxyBase: "" } });
+		await waitFor(() => expect(resolve).toHaveBeenCalledTimes(1));
+		expect(browser.navigate).not.toHaveBeenCalled();
+		rerender({ proxyBase: "http://127.0.0.1:4000/token" });
+		await waitFor(() => expect(browser.navigate).toHaveBeenCalledWith({
+			viewId: "42:remote:box-a:ao-1", url: "http://ao-preview-abc.localhost:4000/",
+		}));
+		expect(browser.navigate).not.toHaveBeenCalledWith(expect.objectContaining({ url: "http://localhost:5173/" }));
+	});
+
+	it("revokes a remote preview origin when its target clears or session terminates", async () => {
+		const browser = setupBridge();
+		const resolve = vi.spyOn(aoBridge.remotes, "previewUrl").mockImplementation(async (_hostId, _sessionId, source) =>
+			source ? "http://ao-preview-abc.localhost:4000/" : "");
+		const { rerender } = renderHook(({ previewUrl, previewRevision, terminated }) => useBrowserView({
+			sessionId: "remote:box-a:ao-1",
+			origin: { hostId: "box-a", sessionId: "ao-1", proxyBase: "http://127.0.0.1:4000/token" },
+			active: true, poppedOut: false, previewUrl, previewRevision, terminated,
+		}), { initialProps: { previewUrl: "http://localhost:5173/", previewRevision: 1, terminated: false } });
+		await waitFor(() => expect(resolve).toHaveBeenCalledWith("box-a", "ao-1", "http://localhost:5173/"));
+		rerender({ previewUrl: "", previewRevision: 2, terminated: false });
+		await waitFor(() => expect(resolve).toHaveBeenLastCalledWith("box-a", "ao-1", ""));
+		rerender({ previewUrl: "http://localhost:5173/", previewRevision: 3, terminated: false });
+		await waitFor(() => expect(resolve).toHaveBeenLastCalledWith("box-a", "ao-1", "http://localhost:5173/"));
+		rerender({ previewUrl: "http://localhost:5173/", previewRevision: 3, terminated: true });
+		await waitFor(() => expect(resolve).toHaveBeenLastCalledWith("box-a", "ao-1", ""));
+		expect(browser.navigate).not.toHaveBeenCalledWith(expect.objectContaining({ url: "http://localhost:5173/" }));
 	});
 
 	it("keeps the user's manual navigation on session switch-back and only re-navigates on a new preview", async () => {
@@ -1079,7 +1528,13 @@ describe("useBrowserView", () => {
 		const bridge = setupBridge();
 		const { result, rerender } = renderHook(
 			({ sessionId, previewUrl, previewRevision }) =>
-				useBrowserView({ sessionId, active: true, poppedOut: false, previewUrl, previewRevision }),
+				useBrowserView({
+					sessionId,
+					active: true,
+					poppedOut: false,
+					previewUrl,
+					previewRevision,
+				}),
 			{
 				initialProps: {
 					sessionId: "sess-1",
@@ -1089,7 +1544,10 @@ describe("useBrowserView", () => {
 			},
 		);
 		await waitFor(() =>
-			expect(bridge.navigate).toHaveBeenCalledWith({ viewId: "42:sess-1", url: "http://localhost:5217/" }),
+			expect(bridge.navigate).toHaveBeenCalledWith({
+				viewId: "42:sess-1",
+				url: "http://localhost:5217/",
+			}),
 		);
 		expect(bridge.navigate).toHaveBeenCalledTimes(1);
 
@@ -1106,9 +1564,17 @@ describe("useBrowserView", () => {
 		);
 
 		// Switch to another session, then back.
-		rerender({ sessionId: "sess-2", previewUrl: undefined, previewRevision: undefined });
+		rerender({
+			sessionId: "sess-2",
+			previewUrl: undefined,
+			previewRevision: undefined,
+		});
 		await waitFor(() => expect(result.current.viewId).toBe("42:sess-2"));
-		rerender({ sessionId: "sess-1", previewUrl: "http://localhost:5217/", previewRevision: 1 });
+		rerender({
+			sessionId: "sess-1",
+			previewUrl: "http://localhost:5217/",
+			previewRevision: 1,
+		});
 		await waitFor(() => expect(result.current.viewId).toBe("42:sess-1"));
 
 		// The already-consumed preview must not be re-asserted: the view keeps
@@ -1117,9 +1583,16 @@ describe("useBrowserView", () => {
 		expect(bridge.clear).not.toHaveBeenCalled();
 
 		// A genuine new `ao preview` (revision bump) still takes over.
-		rerender({ sessionId: "sess-1", previewUrl: "http://localhost:5217/", previewRevision: 2 });
+		rerender({
+			sessionId: "sess-1",
+			previewUrl: "http://localhost:5217/",
+			previewRevision: 2,
+		});
 		await waitFor(() => expect(bridge.navigate).toHaveBeenCalledTimes(2));
-		expect(bridge.navigate).toHaveBeenLastCalledWith({ viewId: "42:sess-1", url: "http://localhost:5217/" });
+		expect(bridge.navigate).toHaveBeenLastCalledWith({
+			viewId: "42:sess-1",
+			url: "http://localhost:5217/",
+		});
 	});
 
 	it("does not re-navigate to the preview when the hook fully remounts for the same session", async () => {
@@ -1221,7 +1694,12 @@ describe("useBrowserView", () => {
 					previewUrl,
 					previewRevision: 1,
 				}),
-			{ initialProps: { sessionId: "sess-1", previewUrl: "http://127.0.0.1:4173/" } },
+			{
+				initialProps: {
+					sessionId: "sess-1",
+					previewUrl: "http://127.0.0.1:4173/",
+				},
+			},
 		);
 
 		await waitFor(() =>
@@ -1245,7 +1723,13 @@ describe("useBrowserView", () => {
 	it("navigates legacy preview URLs when the daemon omits preview revisions", async () => {
 		const bridge = setupBridge();
 		const { result, rerender } = renderHook(
-			({ previewUrl }) => useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false, previewUrl }),
+			({ previewUrl }) =>
+				useBrowserView({
+					sessionId: "sess-1",
+					active: true,
+					poppedOut: false,
+					previewUrl,
+				}),
 			{ initialProps: { previewUrl: undefined as string | undefined } },
 		);
 		await waitFor(() => expect(result.current.viewId).toBe("42:sess-1"));
@@ -1253,14 +1737,19 @@ describe("useBrowserView", () => {
 
 		rerender({ previewUrl: "http://localhost:5173/" });
 		await waitFor(() =>
-			expect(bridge.navigate).toHaveBeenCalledWith({ viewId: "42:sess-1", url: "http://localhost:5173/" }),
+			expect(bridge.navigate).toHaveBeenCalledWith({
+				viewId: "42:sess-1",
+				url: "http://localhost:5173/",
+			}),
 		);
 		expect(bridge.navigate).toHaveBeenCalledTimes(1);
 
 		rerender({ previewUrl: "http://localhost:5173/" });
 		expect(bridge.navigate).toHaveBeenCalledTimes(1);
 
-		rerender({ previewUrl: "C:\\Users\\Lenovo\\Downloads\\sm5\\paper_explainer.html" });
+		rerender({
+			previewUrl: "C:\\Users\\Lenovo\\Downloads\\sm5\\paper_explainer.html",
+		});
 		await waitFor(() =>
 			expect(bridge.navigate).toHaveBeenCalledWith({
 				viewId: "42:sess-1",
@@ -1274,8 +1763,19 @@ describe("useBrowserView", () => {
 		const bridge = setupBridge();
 		const { rerender } = renderHook(
 			({ previewUrl, previewRevision }) =>
-				useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false, previewUrl, previewRevision }),
-			{ initialProps: { previewUrl: "http://localhost:5173/" as string | undefined, previewRevision: 1 } },
+				useBrowserView({
+					sessionId: "sess-1",
+					active: true,
+					poppedOut: false,
+					previewUrl,
+					previewRevision,
+				}),
+			{
+				initialProps: {
+					previewUrl: "http://localhost:5173/" as string | undefined,
+					previewRevision: 1,
+				},
+			},
 		);
 		await waitFor(() => expect(bridge.navigate).toHaveBeenCalledTimes(1));
 
@@ -1350,7 +1850,10 @@ describe("useBrowserView", () => {
 				vi.advanceTimersByTime(300);
 			});
 			expect(bridge.setBounds).toHaveBeenLastCalledWith(
-				expect.objectContaining({ visible: true, rect: expect.objectContaining({ width: 320 }) }),
+				expect.objectContaining({
+					visible: true,
+					rect: expect.objectContaining({ width: 320 }),
+				}),
 			);
 
 			// Terminal pane enters fullscreen: the slot is not inside it, so the
@@ -1361,11 +1864,11 @@ describe("useBrowserView", () => {
 			await act(async () => {
 				vi.advanceTimersByTime(300);
 			});
-			expect(bridge.setBounds).toHaveBeenLastCalledWith({
+			expect(bridge.setBounds).toHaveBeenLastCalledWith(expect.objectContaining({
 				viewId: "42:sess-1",
 				rect: { x: 0, y: 0, width: 0, height: 0 },
 				visible: false,
-			});
+			}));
 
 			// Exiting fullscreen restores the view at its measured bounds.
 			bridge.setBounds.mockClear();
@@ -1375,7 +1878,10 @@ describe("useBrowserView", () => {
 				vi.advanceTimersByTime(300);
 			});
 			expect(bridge.setBounds).toHaveBeenLastCalledWith(
-				expect.objectContaining({ visible: true, rect: expect.objectContaining({ x: 12, width: 320 }) }),
+				expect.objectContaining({
+					visible: true,
+					rect: expect.objectContaining({ x: 12, width: 320 }),
+				}),
 			);
 		} finally {
 			vi.useRealTimers();
@@ -1410,7 +1916,10 @@ describe("useBrowserView", () => {
 
 		await waitFor(() =>
 			expect(bridge.setBounds).toHaveBeenLastCalledWith(
-				expect.objectContaining({ visible: true, rect: expect.objectContaining({ width: 320 }) }),
+				expect.objectContaining({
+					visible: true,
+					rect: expect.objectContaining({ width: 320 }),
+				}),
 			),
 		);
 	});

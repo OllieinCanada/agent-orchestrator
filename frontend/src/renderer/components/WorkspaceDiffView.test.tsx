@@ -1,7 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ReviewDiffBody, type FileAnnotationModel } from "./WorkspaceDiffView";
+import { FileAnnotationComposer, ReviewDiffBody, type FileAnnotationModel } from "./WorkspaceDiffView";
 import type { WorkspaceFileDetail } from "../hooks/useSessionWorkspaceFiles";
 
 const { postMock } = vi.hoisted(() => ({ postMock: vi.fn() }));
@@ -93,7 +92,7 @@ describe("ReviewDiffBody", () => {
 	});
 
 	it("renders a real diff without git-header noise and with markers in the gutter", async () => {
-		render(
+		const { container } = render(
 			<ReviewDiffBody
 				annotation={noopAnnotation()}
 				detail={baseDetail()}
@@ -110,6 +109,7 @@ describe("ReviewDiffBody", () => {
 		expect(screen.getByText(diffLine("const value = 0;"))).toBeInTheDocument();
 		expect(screen.getByText("@@ -1,1 +1,1 @@")).toBeInTheDocument();
 		expect(screen.queryByText("diff --git a/src/App.tsx b/src/App.tsx")).not.toBeInTheDocument();
+		expect(container.querySelector(".diff-code")).toHaveClass("select-text");
 	});
 
 	it("highlights only the changed tokens within a replaced line", async () => {
@@ -194,14 +194,15 @@ describe("ReviewDiffBody", () => {
 		expect(screen.queryByText("Binary file preview is not available.")).not.toBeInTheDocument();
 	});
 
-	it("sends a selected diff range to the session agent via the context menu", async () => {
+	it("keeps native text selection and does not replace its context menu", async () => {
+		const onActiveSelectionChange = vi.fn();
 		render(
 			<ReviewDiffBody
 				annotation={noopAnnotation()}
 				detail={baseDetail()}
 				detailLoadedAt={1}
 				filePath="src/App.tsx"
-				onActiveSelectionChange={vi.fn()}
+				onActiveSelectionChange={onActiveSelectionChange}
 				sessionId="sess-1"
 				split={false}
 				wrap={true}
@@ -219,13 +220,70 @@ describe("ReviewDiffBody", () => {
 			await new Promise((resolve) => setTimeout(resolve, 0));
 		});
 
-		const notCanceled = fireEvent.contextMenu(addedRow, { clientX: 5, clientY: 5 });
-		expect(notCanceled).toBe(false);
+		expect(onActiveSelectionChange).toHaveBeenLastCalledWith(true);
+		expect(fireEvent.contextMenu(addedRow, { clientX: 5, clientY: 5 })).toBe(true);
+		expect(screen.queryByRole("menuitem", { name: "Explain" })).not.toBeInTheDocument();
+	});
 
-		await userEvent.click(await screen.findByRole("menuitem", { name: "Explain" }));
-		await waitFor(() => expect(postMock).toHaveBeenCalled());
-		const body = postMock.mock.calls[0][1].body as { message: string };
-		expect(body.message).toContain("const value = 1;");
+	it("focuses the feedback textarea when an inline composer opens", async () => {
+		const model = noopAnnotation();
+		model.target = { path: "src/App.tsx", side: "new", line: 12, surface: "focused" };
+		render(<FileAnnotationComposer annotation={model} />);
+
+		const textarea = screen.getByRole("textbox", { name: /Feedback for src\/App\.tsx/ });
+		await waitFor(() => expect(textarea).toHaveFocus());
+	});
+
+	it("keeps typing local to the box; ⌘/Ctrl+Enter sends, as its hint says, and plain Enter doesn't", () => {
+		const model = noopAnnotation();
+		model.target = { path: "src/App.tsx", side: "file", surface: "review" };
+		render(<FileAnnotationComposer annotation={model} />);
+
+		expect(screen.getByText("⌘/Ctrl + Enter to send")).toBeInTheDocument();
+		const textarea = screen.getByRole("textbox", { name: /Feedback for src\/App\.tsx/ });
+		fireEvent.change(textarea, { target: { value: "Rename this" } });
+		expect(model.setDraft).not.toHaveBeenCalled();
+		fireEvent.keyDown(textarea, { key: "Enter" });
+		expect(model.submit).not.toHaveBeenCalled();
+		fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+		expect(model.submit).toHaveBeenCalledWith("Rename this");
+		fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+		expect(model.submit).toHaveBeenCalledTimes(2);
+	});
+
+	it("puts Send beside Cancel below the field and sends the typed text on click", () => {
+		const model = noopAnnotation();
+		model.target = { path: "src/App.tsx", side: "file", surface: "review" };
+		render(<FileAnnotationComposer annotation={model} />);
+
+		const textarea = screen.getByRole("textbox", { name: /Feedback for src\/App\.tsx/ });
+		const send = screen.getByRole("button", { name: "Send feedback" });
+		expect(send).toBeDisabled();
+		expect(send.parentElement).toContainElement(screen.getByRole("button", { name: "Cancel" }));
+		expect(textarea.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+		fireEvent.change(textarea, { target: { value: "Add a test" } });
+		fireEvent.click(send);
+		expect(model.submit).toHaveBeenCalledWith("Add a test");
+	});
+
+	it("cancels on Escape or the Cancel button below the field and hands an unsent draft back to the model", () => {
+		const model = noopAnnotation();
+		model.target = { path: "src/App.tsx", side: "new", line: 3, surface: "review" };
+		const { unmount } = render(<FileAnnotationComposer annotation={model} />);
+
+		const textarea = screen.getByRole("textbox", { name: /Feedback for src\/App\.tsx/ });
+		fireEvent.change(textarea, { target: { value: "draft" } });
+		fireEvent.keyDown(textarea, { key: "Escape" });
+		expect(model.cancel).toHaveBeenCalledTimes(1);
+		const cancel = screen.getByRole("button", { name: "Cancel" });
+		// A labelled text button under the field, not an icon beside it.
+		expect(cancel).toHaveTextContent("Cancel");
+		expect(textarea.compareDocumentPosition(cancel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		fireEvent.click(cancel);
+		expect(model.cancel).toHaveBeenCalledTimes(2);
+		unmount();
+		expect(model.setDraft).toHaveBeenCalledWith("draft");
 	});
 
 	describe("large diff virtualization", () => {

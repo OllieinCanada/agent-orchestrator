@@ -4,14 +4,54 @@ package conpty
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 )
 
 // hostSpawner starts a detached pty-host for the session and returns its
-// loopback address ("127.0.0.1:PORT") and OS pid once it prints READY.
+// loopback address ("127.0.0.1:PORT") and OS pid once it prints READY. With
+// startOnAttach the host starts the process at its first client's grid.
 // Injectable for tests: replace this field on Options before calling New.
-type hostSpawner func(ctx context.Context, sessionID, cwd string, argv []string, env map[string]string) (addr string, pid int, err error)
+type hostSpawner func(ctx context.Context, sessionID, cwd string, argv []string, env map[string]string, startOnAttach bool) (addr string, pid int, err error)
+
+// startOnAttachArg is the optional leading pty-host argument that defers the
+// process start (see deferredPTY). Session ids never contain "=", so it cannot
+// be mistaken for the positional session id; a host spawned without it, for
+// example by an older daemon, starts immediately as before.
+const startOnAttachArg = "--start=attach"
+
+// ptyHostArgs builds the pty-host subcommand argv:
+// pty-host [--start=attach] <sessionID> <cwd> <shellCmd> <shellArgs...>
+func ptyHostArgs(sessionID, cwd string, argv []string, startOnAttach bool) []string {
+	args := []string{"pty-host"}
+	if startOnAttach {
+		args = append(args, startOnAttachArg)
+	}
+	args = append(args, sessionID, cwd)
+	return append(args, argv...)
+}
+
+// splitStartOnAttachArg consumes the optional leading --start=attach argument
+// from the pty-host argv (everything after the subcommand name).
+func splitStartOnAttachArg(args []string) (bool, []string) {
+	if len(args) > 0 && args[0] == startOnAttachArg {
+		return true, args[1:]
+	}
+	return false, args
+}
+
+// cleanupStartedHostFailure preserves evidence of a child that may still own
+// the session. A successful kill proves the failed spawn left no runtime;
+// otherwise the stable PID and joined cleanup error let Create expose a typed
+// partial-effect result instead of incorrectly claiming no effect.
+func cleanupStartedHostFailure(pid int, cause error, kill func() error) (int, error) {
+	if killErr := kill(); killErr != nil {
+		return pid, errors.Join(cause, fmt.Errorf("kill started pty-host pid %d: %w", pid, killErr))
+	}
+	return 0, cause
+}
 
 // stripEnvAssignments splits a launch argv that may begin with a Unix-style
 // `env NAME=VALUE ...` prefix into the environment assignments ("NAME=VALUE"

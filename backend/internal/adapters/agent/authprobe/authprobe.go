@@ -19,6 +19,28 @@ var CmdRunner = func(ctx context.Context, name string, arg ...string) ([]byte, e
 // Callers must pass adapter-specific commands; catalog refresh should not run
 // a generic sequence of auth-like commands against every installed binary.
 func CLIStatus(ctx context.Context, binary string, commands [][]string) (ports.AgentAuthStatus, error) {
+	return CLIStatusWithTimeout(ctx, binary, commands, 3*time.Second)
+}
+
+// Classifier reads one probe's raw output. The bool reports whether it
+// recognized the shape at all; false defers to the shared prose classifier.
+type Classifier func(out []byte) (ports.AgentAuthStatus, bool)
+
+// CLIStatusWithClassifier is CLIStatus for a CLI whose status output the shared
+// prose classifier cannot read — structured output, or prose wrapped around it.
+// The adapter's classifier is consulted first and the shared one remains the
+// fallback, so an unrecognized shape still gets the ordinary treatment.
+func CLIStatusWithClassifier(ctx context.Context, binary string, commands [][]string, classify Classifier) (ports.AgentAuthStatus, error) {
+	return cliStatus(ctx, binary, commands, 3*time.Second, classify)
+}
+
+// CLIStatusWithTimeout is CLIStatus with an adapter-specific per-command
+// timeout for CLIs whose native status command has documented startup work.
+func CLIStatusWithTimeout(ctx context.Context, binary string, commands [][]string, timeout time.Duration) (ports.AgentAuthStatus, error) {
+	return cliStatus(ctx, binary, commands, timeout, nil)
+}
+
+func cliStatus(ctx context.Context, binary string, commands [][]string, timeout time.Duration, classify Classifier) (ports.AgentAuthStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return ports.AgentAuthStatusUnknown, err
 	}
@@ -29,7 +51,7 @@ func CLIStatus(ctx context.Context, binary string, commands [][]string) (ports.A
 		return ports.AgentAuthStatusUnknown, nil
 	}
 	for _, args := range commands {
-		status, err := commandStatus(ctx, binary, args)
+		status, err := commandStatus(ctx, binary, args, timeout, classify)
 		if err != nil {
 			return ports.AgentAuthStatusUnknown, err
 		}
@@ -40,8 +62,8 @@ func CLIStatus(ctx context.Context, binary string, commands [][]string) (ports.A
 	return ports.AgentAuthStatusUnknown, nil
 }
 
-func commandStatus(ctx context.Context, binary string, args []string) (ports.AgentAuthStatus, error) {
-	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+func commandStatus(ctx context.Context, binary string, args []string, timeout time.Duration, classify Classifier) (ports.AgentAuthStatus, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	out, err := CmdRunner(probeCtx, binary, args...)
@@ -50,6 +72,11 @@ func commandStatus(ctx context.Context, binary string, args []string) (ports.Age
 			return ports.AgentAuthStatusUnknown, nil
 		}
 		return ports.AgentAuthStatusUnknown, probeCtx.Err()
+	}
+	if classify != nil {
+		if status, ok := classify(out); ok {
+			return status, nil
+		}
 	}
 	status := StatusFromText(string(out))
 	if status != ports.AgentAuthStatusUnknown {
@@ -82,6 +109,12 @@ func StatusFromText(out string) ports.AgentAuthStatus {
 		`"loggedin": false`,
 		`"loggedin":false`,
 	) || hasAny(compactText,
+		// A null account is a CLI saying "nobody is signed in" in JSON rather
+		// than prose. Kiro's `whoami --format json` answers exactly this when
+		// signed out, and matched none of the phrases above.
+		`"account":null`,
+		`'account':null`,
+		"account:null",
 		`"authenticated":false`,
 		`'authenticated':false`,
 		"authenticated:false",

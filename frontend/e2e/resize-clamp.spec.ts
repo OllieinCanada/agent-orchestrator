@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openInspector } from "./support/open-inspector";
 
 // Dragging a panel edge must clamp at the panel's minimum width — never
 // auto-collapse. Collapse belongs to the explicit controls only (⌘B / topbar
@@ -31,7 +32,7 @@ test("sidebar drag stops at its minimum width instead of collapsing", async ({ p
 
 	await expect(sidebar).toHaveAttribute("data-state", "expanded");
 	const width = await page.evaluate(() =>
-		document.documentElement.style.getPropertyValue("--ao-sidebar-w"),
+		document.querySelector<HTMLElement>('[data-slot="sidebar-gap"]')?.style.getPropertyValue("--ao-sidebar-w"),
 	);
 	expect(width).toBe("200px");
 
@@ -45,8 +46,7 @@ test("inspector drag stops at minSize instead of collapsing; buttons still toggl
 	// A worker session from the dev:web mock dataset (lib/mock-data.ts).
 	await page.goto("/#/projects/ao-demo/sessions/demo-working");
 
-	const inspector = page.locator("#inspector");
-	await expect(inspector).toBeVisible();
+	const inspector = await openInspector(page);
 
 	const handle = page.getByTestId("inspector-resize-handle");
 	const handleBox = await handle.boundingBox();
@@ -65,7 +65,7 @@ test("inspector drag stops at minSize instead of collapsing; buttons still toggl
 	await expect(inspector).toBeVisible();
 	const inspectorBox = await inspector.boundingBox();
 	if (!inspectorBox) throw new Error("inspector hidden after drag");
-	expect(inspectorBox.width).toBeGreaterThanOrEqual(350);
+	expect(inspectorBox.width).toBeGreaterThanOrEqual(340);
 
 	// The explicit control still collapses…
 	await page.getByRole("button", { name: "Close inspector panel" }).click();

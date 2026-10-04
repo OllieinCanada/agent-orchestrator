@@ -5,6 +5,7 @@ import {
 	type BrowserProfile,
 	type BrowserProfileListState,
 	type BrowserProfileMenuInput,
+	type BrowserProfileSelectInput,
 	type BrowserProfileViewState,
 } from "../shared/browser-profiles";
 import type { BrowserImportRequest } from "../shared/browser-profile-import";
@@ -42,6 +43,7 @@ export type BrowserProfileIpcOptions = {
 	importer: BrowserProfileImportService;
 	buildMenu: (items: BrowserProfileMenuItem[]) => BrowserProfileMenu;
 	confirmSwitch: (labels: BrowserProfileMenuInput["labels"]) => Promise<boolean>;
+	reportSwitchFailure: (message: string, labels: BrowserProfileMenuInput["labels"]) => void;
 };
 
 export type BrowserProfileIpc = {
@@ -170,9 +172,9 @@ export function registerBrowserProfileIpc(options: BrowserProfileIpcOptions): Br
 			await options.store.deleteProfile(profileId);
 		});
 	});
-	handle("browserProfiles:import:discover", async (event) => {
+	handle("browserProfiles:import:discover", async (event, input: unknown) => {
 		if (!trustedShellSender(event, options.shellWebContents)) return { sources: [] };
-		return options.importer.discover();
+		return options.importer.discover(isRecord(input) && typeof input.sourceId === "string" ? { sourceId: input.sourceId } : undefined);
 	});
 	handle("browserProfiles:import:start", async (event, input: unknown) => {
 		if (!trustedShellSender(event, options.shellWebContents)) throw invalid("Untrusted browser profile sender.");
@@ -184,6 +186,15 @@ export function registerBrowserProfileIpc(options: BrowserProfileIpcOptions): Br
 		const viewId = viewIdFromInput(rawViewId);
 		if (!options.host.isRendererOwned(event, viewId)) return { ...EMPTY_PROFILE_STATE };
 		return options.host.getProfileState(viewId) ?? { ...EMPTY_PROFILE_STATE, viewId };
+	});
+	handle("browser:profile:select", async (event, input: unknown) => {
+		if (!isRecord(input)) throw invalid("Browser profile selection is invalid.");
+		const viewId = viewIdFromInput(input.viewId);
+		if (!options.host.isRendererOwned(event, viewId)) return undefined;
+		const profileId = input.profileId === null ? null : profileIdFromInput(input.profileId);
+		const labels = labelsFromInput(input.labels) satisfies BrowserProfileSelectInput["labels"];
+		await selectFromMenu(viewId, profileId, labels, options);
+		return undefined;
 	});
 	handle("browser:profile:menu", (event, input: unknown) => {
 		if (!isRecord(input)) throw invalid("Browser profile menu input is invalid.");
@@ -247,5 +258,6 @@ async function selectFromMenu(
 		await options.host.switchProfile(viewId, profileId);
 	} catch (error) {
 		console.error("browser profile switch failed:", error);
+		options.reportSwitchFailure(error instanceof Error ? error.message : "Browser profile could not be switched.", labels);
 	}
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { useSidebarChromeGeometry } from "../../hooks/useSidebarChromeGeometry";
+
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { PanelLeftIcon } from "lucide-react";
@@ -154,15 +156,20 @@ function Sidebar({
 	collapsible = "offcanvas",
 	className,
 	children,
+	resizeScopeRef,
 	...props
 }: React.ComponentProps<"div"> & {
 	side?: "left" | "right";
 	variant?: "sidebar" | "floating" | "inset";
 	collapsible?: "offcanvas" | "icon" | "none";
+	resizeScopeRef?: React.RefObject<HTMLDivElement | null>;
 }) {
 	const { t } = useTranslation();
 	const prefersReducedMotion = useReducedMotion();
 	const { isMobile, state, openMobile, setOpenMobile, isReady } = useSidebar();
+	const gapRef = React.useRef<HTMLDivElement>(null);
+	const containerRef = React.useRef<HTMLDivElement>(null);
+	useSidebarChromeGeometry(!isMobile && side === "left" && collapsible !== "none", gapRef, containerRef);
 
 	if (collapsible === "none") {
 		return (
@@ -216,7 +223,7 @@ function Sidebar({
 				? variant === "floating" || variant === "inset"
 					? "calc(var(--sidebar-width-icon) + 1rem)"
 					: "var(--sidebar-width-icon)"
-				: "var(--sidebar-width)";
+				: "var(--ao-sidebar-w, var(--sidebar-width))";
 
 	// Several React HTML event types conflict with Motion's overloaded versions.
 	// Cast once so callers can keep passing through plain div props.
@@ -231,11 +238,13 @@ function Sidebar({
 			data-variant={variant}
 			data-side={side}
 			data-slot="sidebar"
+			ref={resizeScopeRef}
 		>
 			{/* Layout gap follows the sidebar width so <main> expands and contracts
 			    smoothly with the shell instead of snapping on a separate CSS timer. */}
 			<motion.div
 				data-slot="sidebar-gap"
+				ref={gapRef}
 				initial={false}
 				animate={{ width: gapTargetWidth }}
 				transition={activeTransition}
@@ -245,11 +254,15 @@ function Sidebar({
 			    uses the same curve as the section animations. */}
 			<motion.div
 				data-slot="sidebar-container"
+				ref={containerRef}
 				initial={false}
 				animate={{ x: containerX }}
 				transition={activeTransition}
 				className={cn(
-					"fixed inset-y-0 z-chrome hidden h-svh w-(--sidebar-width) md:flex",
+					// Prefer top/bottom over inset-y so callers can clear titlebar chrome
+					// with `top-(--sidebar-chrome-offset)` without fighting inset-y-0.
+					// DO NOT restore `inset-y-0` + `h-svh` — under-topbar offset then clips wrong.
+					"fixed top-0 bottom-0 z-chrome hidden w-(--ao-sidebar-w,var(--sidebar-width)) md:flex",
 					side === "left" ? "left-0" : "right-0",
 					// Adjust the padding for floating and inset variants.
 					variant === "floating" || variant === "inset"

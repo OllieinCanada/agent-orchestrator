@@ -19,6 +19,10 @@ import (
 // layer can open a Stream against the selected runtime.
 type Runtime interface {
 	ports.Runtime // Create, Destroy, IsAlive
+	ports.RuntimeChildInspector
+	ports.FencedRuntimeProber
+	ports.ExactSupervisedProcessInspector
+	ports.SupervisedProcessRecordInspector
 	ports.Attacher
 	Interrupt(ctx context.Context, handle ports.RuntimeHandle) error
 	SendInput(ctx context.Context, handle ports.RuntimeHandle, input string) error

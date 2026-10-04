@@ -58,6 +58,17 @@ func TestSessionListDerivesKanbanColumn(t *testing.T) {
 			want: domain.KanbanValidating,
 		},
 		{
+			name:   "a failed auto review keeps a mergeable pr validating",
+			record: domain.SessionRecord{ID: "mer-1", ProjectID: "mer", AutoReviewEnabled: true},
+			pr: &domain.PRFacts{
+				URL: "pr1", HeadSHA: "head1", Mergeability: domain.MergeMergeable,
+			},
+			runs: []domain.CurrentHeadReviewRun{
+				{PRURL: "pr1", Status: domain.ReviewRunFailed},
+			},
+			want: domain.KanbanValidating,
+		},
+		{
 			name:   "a human approval on a blocked pr is ready",
 			record: domain.SessionRecord{ID: "mer-1", ProjectID: "mer"},
 			pr: &domain.PRFacts{
@@ -141,8 +152,11 @@ func TestSessionListDerivesDisplayStatus(t *testing.T) {
 			want:   contract.DisplayReviewPending,
 		},
 		{
-			name:   "failing checks on the current head are being fixed",
-			record: domain.SessionRecord{ID: "mer-1", ProjectID: "mer", AutoInjectCI: true},
+			name: "failing checks on the current head are being fixed",
+			record: domain.SessionRecord{
+				ID: "mer-1", ProjectID: "mer", AutoInjectCI: true,
+				Activity: domain.Activity{State: domain.ActivityActive},
+			},
 			pr: &domain.PRFacts{
 				URL: "pr1", HeadSHA: "head1",
 				CI: domain.CIFailing,
@@ -179,6 +193,7 @@ func TestSessionKanbanExternalChangesStayPersonOwned(t *testing.T) {
 	st := newFakeStore()
 	st.sessions["mer-1"] = domain.SessionRecord{
 		ID: "mer-1", ProjectID: "mer", AutoInjectReview: true,
+		Activity: domain.Activity{State: domain.ActivityActive},
 	}
 	st.pr["mer-1"] = domain.PRFacts{
 		URL: "pr1", HeadSHA: "head1", Review: domain.ReviewChangesRequest, ExternalChangesRequested: true,

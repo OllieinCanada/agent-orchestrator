@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/opencode"
 	agentregistry "github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/registry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
@@ -33,17 +34,18 @@ const (
 )
 
 type readinessCoordinatorConfig struct {
-	Agents         []agentregistry.HarnessAgent
-	Factory        func() []agentregistry.HarnessAgent
-	Context        context.Context
-	Logger         *slog.Logger
-	Now            func() time.Time
-	DisplayTTL     time.Duration
-	LaunchTTL      time.Duration
-	InstallTimeout time.Duration
-	AuthTimeout    time.Duration
-	RetryDelays    []time.Duration
-	Workers        int
+	Agents              []agentregistry.HarnessAgent
+	Factory             func() []agentregistry.HarnessAgent
+	Context             context.Context
+	Logger              *slog.Logger
+	Now                 func() time.Time
+	DisplayTTL          time.Duration
+	LaunchTTL           time.Duration
+	InstallTimeout      time.Duration
+	AuthTimeout         time.Duration
+	RetryDelays         []time.Duration
+	Workers             int
+	AuthenticationCheck func(context.Context, string, domain.AgentReadinessPurpose) (domain.AgentAuthenticationObservation, bool)
 }
 
 type readinessEntry struct {
@@ -58,27 +60,34 @@ type readinessEntry struct {
 }
 
 type readinessCall struct {
+	key            readinessCallKey
 	done           chan struct{}
 	checks         readinessInvalidation
 	installVersion uint64
 	authVersion    uint64
 }
 
+type readinessCallKey struct {
+	id           string
+	presenceOnly bool
+}
+
 type readinessCoordinator struct {
-	ctx            context.Context
-	factory        func() []agentregistry.HarnessAgent
-	logger         *slog.Logger
-	now            func() time.Time
-	displayTTL     time.Duration
-	launchTTL      time.Duration
-	installTimeout time.Duration
-	authTimeout    time.Duration
-	retryDelays    []time.Duration
-	workers        int
+	ctx                 context.Context
+	factory             func() []agentregistry.HarnessAgent
+	logger              *slog.Logger
+	now                 func() time.Time
+	displayTTL          time.Duration
+	launchTTL           time.Duration
+	installTimeout      time.Duration
+	authTimeout         time.Duration
+	retryDelays         []time.Duration
+	workers             int
+	authenticationCheck func(context.Context, string, domain.AgentReadinessPurpose) (domain.AgentAuthenticationObservation, bool)
 
 	mu      sync.Mutex
 	entries map[string]*readinessEntry
-	calls   map[string]*readinessCall
+	calls   map[readinessCallKey]*readinessCall
 }
 
 type unsupportedAgentError struct{ id string }
@@ -126,7 +135,8 @@ func newReadinessCoordinator(cfg readinessCoordinatorConfig) *readinessCoordinat
 		displayTTL: cfg.DisplayTTL, launchTTL: cfg.LaunchTTL,
 		installTimeout: cfg.InstallTimeout, authTimeout: cfg.AuthTimeout,
 		retryDelays: cfg.RetryDelays, workers: cfg.Workers,
-		entries: make(map[string]*readinessEntry, len(cfg.Agents)), calls: make(map[string]*readinessCall),
+		authenticationCheck: cfg.AuthenticationCheck,
+		entries:             make(map[string]*readinessEntry, len(cfg.Agents)), calls: make(map[readinessCallKey]*readinessCall),
 	}
 	for _, item := range cfg.Agents {
 		id := string(item.Harness)
@@ -189,8 +199,9 @@ func (c *readinessCoordinator) Force(ctx context.Context, agentIDs []string, pur
 }
 
 // FindInstalled returns as soon as one bounded installation-only ensure
-// confirms a harness. Checks already in progress remain shared and continue
-// under the daemon context after this caller stops waiting.
+// confirms a harness. Compatible checks already in progress remain shared and
+// continue under the daemon context after this caller stops waiting; presence
+// checks never inherit an execution-enabled identity probe.
 func (c *readinessCoordinator) FindInstalled(ctx context.Context, purpose domain.AgentReadinessPurpose) (domain.AgentReadinessSnapshot, bool) {
 	if err := ctx.Err(); err != nil || !purpose.Valid() {
 		return domain.AgentReadinessSnapshot{}, false
@@ -239,6 +250,10 @@ func (c *readinessCoordinator) FindInstalled(ctx context.Context, purpose domain
 }
 
 func (c *readinessCoordinator) ensure(ctx context.Context, agentIDs []string, purpose domain.AgentReadinessPurpose, requested readinessInvalidation) ([]domain.AgentReadinessSnapshot, error) {
+	return c.ensureMode(ctx, agentIDs, purpose, requested, false)
+}
+
+func (c *readinessCoordinator) ensureMode(ctx context.Context, agentIDs []string, purpose domain.AgentReadinessPurpose, requested readinessInvalidation, presenceOnly bool) ([]domain.AgentReadinessSnapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -265,7 +280,7 @@ func (c *readinessCoordinator) ensure(ctx context.Context, agentIDs []string, pu
 				results <- result{index: index, err: ctx.Err()}
 				return
 			}
-			item, err := c.ensureOne(ctx, id, purpose, requested, false)
+			item, err := c.ensureOne(ctx, id, purpose, requested, presenceOnly)
 			results <- result{index: index, item: item, err: err}
 		}(index, id)
 	}
@@ -304,7 +319,8 @@ func (c *readinessCoordinator) ensureOne(ctx context.Context, id string, purpose
 		c.logDecision(id, purpose, "retry_delayed", 0, snapshot, readinessFailureCategory(snapshot), nextRetry)
 		return snapshot, nil
 	}
-	if call := c.calls[id]; call != nil {
+	key := readinessCallKey{id: id, presenceOnly: presenceOnly}
+	if call := c.calls[key]; call != nil {
 		joinedAt := c.now()
 		joinedChecks := call.checks
 		joinedInstallVersion := call.installVersion
@@ -331,13 +347,38 @@ func (c *readinessCoordinator) ensureOne(ctx context.Context, id string, purpose
 			return domain.AgentReadinessSnapshot{}, ctx.Err()
 		}
 	}
+	if presenceOnly {
+		if call := c.calls[readinessCallKey{id: id}]; call != nil {
+			snapshot := c.snapshotLocked(entry, purpose)
+			// A prior installed state is not proof while an execution-enabled
+			// refresh is still replacing it. Presence callers must not inherit
+			// that in-flight call or report the stale state as installed.
+			snapshot.Installation.State = domain.AgentInstallationUnknown
+			snapshot.EffectiveReadiness = domain.EffectiveAgentReadiness(snapshot.Installation.State, snapshot.Authentication.State)
+			c.mu.Unlock()
+			c.logDecision(id, purpose, "presence_in_flight_execution", 0, snapshot, "", time.Time{})
+			return snapshot, nil
+		}
+	} else if call := c.calls[readinessCallKey{id: id, presenceOnly: true}]; call != nil {
+		// Presence and identity checks have different guarantees. Let a normal
+		// caller wait for the process-free pass to finish, then retry so an
+		// identity-pending result cannot satisfy the normal check from cache.
+		c.mu.Unlock()
+		select {
+		case <-call.done:
+			return c.ensureOne(ctx, id, purpose, requested, false)
+		case <-ctx.Done():
+			return domain.AgentReadinessSnapshot{}, ctx.Err()
+		}
+	}
 	call := &readinessCall{
+		key:            key,
 		done:           make(chan struct{}),
 		checks:         needed,
 		installVersion: entry.installVersion,
 		authVersion:    entry.authVersion,
 	}
-	c.calls[id] = call
+	c.calls[key] = call
 	entry.checking = needed
 	started := c.now()
 	c.mu.Unlock()
@@ -410,7 +451,7 @@ func (c *readinessCoordinator) runCheck(id string, purpose domain.AgentReadiness
 			switch state {
 			case domain.AgentInstallationInstalled:
 				if needed&readinessInvalidateAuthentication != 0 {
-					auth, authFailed = c.checkAuthentication(item)
+					auth, authFailed = c.checkAuthentication(item, purpose)
 				}
 			case domain.AgentInstallationNotInstalled:
 				auth = skippedAuthentication(c.now())
@@ -427,7 +468,8 @@ func (c *readinessCoordinator) runCheck(id string, purpose domain.AgentReadiness
 			preserveInstallationFailure(&entry.snapshot.Installation, install)
 		} else {
 			entry.snapshot.Installation = install
-			if entry.installVersion == call.installVersion {
+			if entry.installVersion == call.installVersion &&
+				(!presenceOnly || install.ReasonCode != domain.AgentReadinessReasonInstallIdentityPending) {
 				entry.invalidated &^= readinessInvalidateInstallation
 			}
 		}
@@ -466,7 +508,7 @@ func (c *readinessCoordinator) runCheck(id string, purpose domain.AgentReadiness
 	snapshot := c.snapshotLocked(entry, purpose)
 	nextRetry := entry.nextRetryAt
 	duration := c.now().Sub(started)
-	delete(c.calls, id)
+	delete(c.calls, call.key)
 	close(call.done)
 	c.mu.Unlock()
 	c.logDecision(id, purpose, "new_check", duration, snapshot, failureCode, nextRetry)
@@ -485,11 +527,18 @@ func (c *readinessCoordinator) checkInstallation(item agentregistry.HarnessAgent
 	} else {
 		return successfulInstallation(attempted, domain.AgentInstallationUnknown, domain.AgentReadinessReasonInstallCheckUnsupported, "Installation checks are not supported for this harness."), false
 	}
+	if errors.Is(err, ports.ErrAgentBinaryIdentityUnknown) {
+		return successfulInstallation(attempted, domain.AgentInstallationUnknown, domain.AgentReadinessReasonInstallIdentityPending, item.Manifest.Name+" is present but its identity has not been confirmed."), false
+	}
 	if err == nil && path != "" {
 		return successfulInstallation(attempted, domain.AgentInstallationInstalled, domain.AgentReadinessReasonInstalled, item.Manifest.Name+" is installed."), false
 	}
 	if errors.Is(err, ports.ErrAgentBinaryNotFound) {
 		return successfulInstallation(attempted, domain.AgentInstallationNotInstalled, domain.AgentReadinessReasonNotInstalled, item.Manifest.Name+" is not installed."), false
+	}
+	var incompatibleVersion *opencode.IncompatibleVersionError
+	if errors.As(err, &incompatibleVersion) {
+		return successfulInstallation(attempted, domain.AgentInstallationNotInstalled, domain.AgentReadinessReasonInstallIncompatibleVersion, err.Error()), false
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return failedInstallation(attempted, domain.AgentReadinessReasonInstallCheckTimeout, "Installation check timed out."), true
@@ -497,8 +546,17 @@ func (c *readinessCoordinator) checkInstallation(item agentregistry.HarnessAgent
 	return failedInstallation(attempted, domain.AgentReadinessReasonInstallCheckFailed, "Installation check failed."), true
 }
 
-func (c *readinessCoordinator) checkAuthentication(item agentregistry.HarnessAgent) (domain.AgentAuthenticationObservation, bool) {
+func (c *readinessCoordinator) checkAuthentication(item agentregistry.HarnessAgent, purpose domain.AgentReadinessPurpose) (domain.AgentAuthenticationObservation, bool) {
 	attempted := c.now()
+	if c.authenticationCheck != nil {
+		ctx, cancel := context.WithTimeout(c.ctx, c.authTimeout)
+		observation, handled := c.authenticationCheck(ctx, string(item.Harness), purpose)
+		cancel()
+		if handled {
+			failed := isReadinessFailureCode(observation.ReasonCode)
+			return observation, failed
+		}
+	}
 	checker, ok := item.Agent.(ports.AgentAuthChecker)
 	if !ok {
 		return successfulAuthentication(attempted, domain.AgentAuthenticationUnknown, domain.AgentReadinessReasonAuthCheckUnsupported, "Authentication checks are not supported for this harness."), false
@@ -517,6 +575,12 @@ func (c *readinessCoordinator) checkAuthentication(item agentregistry.HarnessAge
 		return successfulAuthentication(attempted, domain.AgentAuthenticationAuthorized, domain.AgentReadinessReasonAuthorized, item.Manifest.Name+" appears signed in."), false
 	case ports.AgentAuthStatusUnauthorized:
 		return successfulAuthentication(attempted, domain.AgentAuthenticationUnauthorized, domain.AgentReadinessReasonUnauthorized, item.Manifest.Name+" needs authentication."), false
+	case ports.AgentAuthStatusConfigured:
+		// A definite observation — a credential exists — but not a verified
+		// one. It is recorded as a success so the coordinator does not retry
+		// it as a failure, and it derives to unknown readiness, not ready.
+		return successfulAuthentication(attempted, domain.AgentAuthenticationConfigured, domain.AgentReadinessReasonAuthConfigured,
+			item.Manifest.Name+" has credentials configured, but AO could not verify them."), false
 	default:
 		return failedAuthentication(attempted, domain.AgentReadinessReasonAuthCheckInconclusive, "Authentication check was inconclusive."), true
 	}
@@ -543,10 +607,16 @@ func (c *readinessCoordinator) Invalidate(agentID string, invalidation readiness
 
 func (c *readinessCoordinator) Warm() {
 	go func() {
-		// Finish the bounded presence pass first so the desktop startup gate can
-		// reuse installation work without waiting behind an authentication probe.
-		_, _ = c.EnsureInstallation(c.ctx, nil, domain.AgentReadinessPurposeDisplay)
-		_, _ = c.Ensure(c.ctx, nil, domain.AgentReadinessPurposeDisplay)
+		// Warm installation through the process-free capability first. Goose's
+		// normal resolver validates identity by running --help, so startup must
+		// not accidentally turn this background cache fill into an execution
+		// probe. Adapters without a presence capability retain their existing
+		// installation check behavior.
+		_, _ = c.ensureMode(c.ctx, nil, domain.AgentReadinessPurposeDisplay, readinessInvalidateInstallation, true)
+		// Preserve the warm authentication pass without asking adapters to
+		// resolve installation again. An identity-pending installation yields an
+		// inconclusive auth observation until an explicit normal refresh.
+		_, _ = c.ensureMode(c.ctx, nil, domain.AgentReadinessPurposeDisplay, readinessInvalidateAuthentication, false)
 	}()
 }
 

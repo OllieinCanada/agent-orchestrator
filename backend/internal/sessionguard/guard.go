@@ -215,6 +215,20 @@ func (g *Guard) DeliverUnderMutation(ctx context.Context, id domain.SessionID, m
 	})
 }
 
+// DeliverUnderMutationChecked adds one caller-owned proof immediately before
+// an admitted mutation writes to the pane. Agent switching uses it to ensure
+// the target runtime generation still owns the terminal after readiness wait.
+func (g *Guard) DeliverUnderMutationChecked(
+	ctx context.Context,
+	id domain.SessionID,
+	msg string,
+	preWrite func(context.Context, domain.SessionRecord) error,
+) (Outcome, error) {
+	return g.sendAdmittedChecked(ctx, id, msg, func(rec domain.SessionRecord) (Outcome, bool) {
+		return SuppressedAwaitingUser, rec.Activity.State == domain.ActivityBlocked
+	}, preWrite)
+}
+
 // CoordinationUnderMutation writes an AO coordination message while the caller
 // owns the session's exclusive mutation fence. It intentionally bypasses the
 // ordinary input lease (which the mutation has already closed), but re-reads
@@ -278,6 +292,41 @@ func (g *Guard) coordinationUnderMutation(
 // either answers a dialog or submits text the user never saw.
 func (g *Guard) Nudge(ctx context.Context, id domain.SessionID, msg string) (Outcome, error) {
 	return g.send(ctx, id, msg, g.refuseNudge)
+}
+
+// NudgeUrgent writes an AO-initiated message that must reach the agent even
+// while the session sits idle at a needs-input prompt (waiting_input) —
+// reserved for alerts where a human parked at that prompt may be exactly who
+// needs to act (e.g. a merge conflict needing a rebase or a redirected agent),
+// unlike a routine reaction nudge that can simply wait for the agent to resume
+// on its own. It still refuses while a TUI session has not yet signalled
+// startup and while the session is blocked on a live permission decision (an
+// unsolicited paste+Enter there answers the dialog rather than merely being
+// read late).
+//
+// waiting_input is only safe on a harness that reports a permission dialog AS
+// blocked. Harnesses that instead surface an ambiguous permission state as
+// waiting_input (codex maps permission-request to waiting_input — see
+// ports.BlockedActivitySignaler) would have this unsolicited write land on that
+// hidden dialog. acceptsWaitingInput is the adapter-declared capability that a
+// waiting_input prompt is a genuine idle composer, not a masked decision; a nil
+// predicate is treated as "cannot distinguish", so an unknown harness never
+// takes an urgent write while waiting_input. This mirrors
+// CoordinationUnderMutation's waiting_input gating.
+func (g *Guard) NudgeUrgent(ctx context.Context, id domain.SessionID, msg string, acceptsWaitingInput func(domain.AgentHarness) bool) (Outcome, error) {
+	return g.send(ctx, id, msg, func(rec domain.SessionRecord) (Outcome, bool) {
+		if g.tuiAwaitingStartupInput(rec) {
+			return SuppressedStartupPending, true
+		}
+		switch rec.Activity.State {
+		case domain.ActivityBlocked:
+			return SuppressedAwaitingUser, true
+		case domain.ActivityWaitingInput:
+			return SuppressedAwaitingUser, acceptsWaitingInput == nil || !acceptsWaitingInput(rec.Harness)
+		default:
+			return SuppressedUnknown, false
+		}
+	})
 }
 
 // NudgeCoordination writes an AO-initiated coordination message under the full

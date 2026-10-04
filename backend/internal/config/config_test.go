@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,8 +49,14 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DataDir != wantDataDir {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, wantDataDir)
 	}
+	if wantStateDir := filepath.Join(homeDir, ".ao"); cfg.StateDir != wantStateDir {
+		t.Errorf("StateDir = %q, want %q", cfg.StateDir, wantStateDir)
+	}
 	if cfg.Telemetry.Remote != TelemetryRemoteOff || cfg.Telemetry.PostHogHost != DefaultTelemetryPostHogHost {
 		t.Fatalf("Telemetry defaults = %+v", cfg.Telemetry)
+	}
+	if cfg.Telemetry.EventsExplicit {
+		t.Fatal("Telemetry.EventsExplicit = true for an absent setting")
 	}
 }
 
@@ -76,6 +83,9 @@ func TestLoadAbsolutizesRelativeOverrides(t *testing.T) {
 	}
 	if want := filepath.Join(cwd, "rel-data"); cfg.DataDir != want {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, want)
+	}
+	if cfg.StateDir != cfg.DataDir {
+		t.Errorf("StateDir = %q, want explicit DataDir %q", cfg.StateDir, cfg.DataDir)
 	}
 	if want := filepath.Join(cwd, "rel-running.json"); cfg.RunFilePath != want {
 		t.Errorf("RunFilePath = %q, want %q", cfg.RunFilePath, want)
@@ -117,8 +127,14 @@ func TestLoadOverrides(t *testing.T) {
 	if cfg.DataDir != dataDir {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, dataDir)
 	}
+	if cfg.StateDir != dataDir {
+		t.Errorf("StateDir = %q, want explicit DataDir %q", cfg.StateDir, dataDir)
+	}
 	if !cfg.Telemetry.Events || cfg.Telemetry.Metrics {
 		t.Fatalf("Telemetry toggles = %+v", cfg.Telemetry)
+	}
+	if !cfg.Telemetry.EventsExplicit {
+		t.Fatal("Telemetry.EventsExplicit = false for AO_TELEMETRY_EVENTS=on")
 	}
 	if cfg.Telemetry.Remote != TelemetryRemotePostHog || cfg.Telemetry.PostHogKey != "phc_test" || cfg.Telemetry.PostHogHost != "https://eu.i.posthog.com" {
 		t.Fatalf("Telemetry remote = %+v", cfg.Telemetry)
@@ -254,7 +270,7 @@ func TestLoadOfferingDefaults(t *testing.T) {
 	if !cfg.LocalOffering {
 		t.Error("LocalOffering = false, want true by default")
 	}
-	if cfg.CloudControlPlaneURL != "https://staging-api.aoagents.dev" {
+	if cfg.CloudControlPlaneURL != "https://api.aoagents.dev" {
 		t.Errorf("CloudControlPlaneURL = %q, want the baked default", cfg.CloudControlPlaneURL)
 	}
 }
@@ -454,5 +470,59 @@ func TestLoadGitLabInvalidHostTokens(t *testing.T) {
 				t.Fatal("Load() = nil error, want error for malformed AO_GITLAB_HOST_TOKENS")
 			}
 		})
+	}
+}
+
+func TestLoadTrackerIntakeDefaultsOff(t *testing.T) {
+	// A blank-but-present value counts as unset. Load() feeds every ao
+	// command, so treating it as malformed would fail `ao status`/`ao stop`
+	// over an empty export rather than just leaving intake off.
+	for _, raw := range []string{"", " ", "\t"} {
+		t.Run(fmt.Sprintf("%q", raw), func(t *testing.T) {
+			t.Setenv("AO_TRACKER_INTAKE", raw)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.TrackerIntake {
+				t.Error("TrackerIntake = true, want false by default")
+			}
+		})
+	}
+}
+
+func TestLoadTrackerIntakeToggle(t *testing.T) {
+	on := []string{"on", "true", "1", "yes"}
+	off := []string{"off", "false", "0", "no"}
+	for _, raw := range on {
+		t.Run("on/"+raw, func(t *testing.T) {
+			t.Setenv("AO_TRACKER_INTAKE", raw)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if !cfg.TrackerIntake {
+				t.Errorf("TrackerIntake = false for %q, want true", raw)
+			}
+		})
+	}
+	for _, raw := range off {
+		t.Run("off/"+raw, func(t *testing.T) {
+			t.Setenv("AO_TRACKER_INTAKE", raw)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.TrackerIntake {
+				t.Errorf("TrackerIntake = true for %q, want false", raw)
+			}
+		})
+	}
+}
+
+func TestLoadTrackerIntakeRejectsGarbage(t *testing.T) {
+	t.Setenv("AO_TRACKER_INTAKE", "maybe")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() = nil error, want error for malformed AO_TRACKER_INTAKE")
 	}
 }
