@@ -219,13 +219,12 @@ export const SessionInspector = memo(function SessionInspector({
 		hostId,
 	);
 	// An attached PR can reach the SCM query before the workspace snapshot.
-	// Use the same PR facts as the cards for review visibility and eligibility.
+	// Retain existing URLs because stored AO review runs refer to them.
 	const reviewSession = useMemo(() => {
 		if (!session || session.cloud || !reviewPRs.data) return session;
 		const factsByURL = new Map(session.prs.map((fact) => [fact.url, fact]));
-		return {
-			...session,
-			prs: sessionPRDisplaySummaries(session, reviewPRs.data.prs).map((pr) => ({
+		for (const pr of reviewPRs.data.prs) {
+			factsByURL.set(pr.url, {
 				...factsByURL.get(pr.url),
 				url: pr.url,
 				number: pr.number,
@@ -235,8 +234,9 @@ export const SessionInspector = memo(function SessionInspector({
 				mergeability: pr.mergeability?.state ?? "unknown",
 				reviewComments: pr.review?.hasUnresolvedHumanComments ?? false,
 				updatedAt: pr.updatedAt ?? session.updatedAt,
-			})),
-		};
+			});
+		}
+		return { ...session, prs: [...factsByURL.values()] };
 	}, [session, reviewPRs.data]);
 	const [internalView, setInternalView] = useState<InspectorView>("summary");
 	const [browserTopbarHost, setBrowserTopbarHost] = useState<HTMLDivElement | null>(null);
