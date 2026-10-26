@@ -29,3 +29,13 @@ jobs:
       - name: Test inspector and review helpers
         working-directory: frontend
         run: npm test -- src/renderer/components/SessionInspector.test.tsx src/renderer/components/SessionInspector.remote.test.tsx src/renderer/lib/session-reviews.test.ts src/renderer/lib/pr-display.test.ts
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Build frontend package
+        working-directory: frontend
+        env:
+          AO_RELEASE_REPO: OllieinCanada/agent-orchestrator
+        run: npm run build
