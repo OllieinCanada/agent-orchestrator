@@ -1,0 +1,25 @@
+name: PR merge regression validation
+
+on:
+  push:
+    branches: ["validation/pr-merge-7210"]
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Show formatting differences
+        run: gofmt -d internal/cli/pr.go internal/cli/pr_test.go
+      - name: Run PR merge regressions
+        run: go test -count=1 -run '^TestPRMerge' ./internal/cli
