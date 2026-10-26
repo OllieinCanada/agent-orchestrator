@@ -46,9 +46,9 @@ func newPRMergeCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "merge <pr-number>",
 		Short: "Merge a pull request",
-		Long:  "Merge a tracked pull request at the exact head you reviewed. Both --url and " +
+		Long: "Merge a tracked pull request at the exact head you reviewed. Both --url and " +
 			"--expected-head-sha are required; the daemon rechecks merge readiness and rejects a changed head.",
-		Args:  usageArgs(cobra.ExactArgs(1)),
+		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prNumber, err := normalizePRNumber(args[0])
 			if err != nil {
