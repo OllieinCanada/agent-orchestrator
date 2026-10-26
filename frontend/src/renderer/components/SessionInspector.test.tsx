@@ -589,6 +589,40 @@ describe("SessionInspector PR section", () => {
         .closest("[data-testid='inspector-section']") as HTMLElement,
     );
 
+
+  it("shows review-triggered PR context before workspace PR facts catch up", async () => {
+    const attached = prSummary(7, "open", {
+      url: "https://github.com/acme/repo/pull/7",
+    });
+    const state = {
+      ...reviewState(7, "up_to_date"),
+      prUrl: attached.url,
+      latestRun: {
+        ...approvedReview,
+        prUrl: attached.url,
+        targetSha: "sha-7",
+        githubReviewId: "98765",
+        body: "Review-only carrier approved this change.",
+        autoInjectReview: false,
+      },
+    };
+    const respond = commonGetsResponder([], "reviewer-pane", [state]);
+    getMock.mockImplementation(async (path: string) =>
+      path === "/api/v1/sessions/{sessionId}/pr"
+        ? { data: { sessionId: "sess-1", prs: [attached], linkedPrs: [] } }
+        : respond(path),
+    );
+    renderWithQuery(
+      <SessionInspector session={session([], { autoInjectReview: false })} />,
+    );
+
+    expect(await screen.findByRole("link", { name: "PR 7" })).toHaveAttribute("href", attached.url);
+    await userEvent.click(screen.getByRole("tab", { name: "Reviews" }));
+    expect(await screen.findByText("Review-only carrier approved this change.")).toBeInTheDocument();
+    expect(postMock).not.toHaveBeenCalled();
+    expect(patchMock).not.toHaveBeenCalled();
+  });
+
   it("shows a reported external PR from one SCM request without tracked actions", async () => {
     const respond = commonGetsResponder();
     getMock.mockImplementation(async (path: string) => {
