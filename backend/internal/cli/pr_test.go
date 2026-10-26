@@ -3,7 +3,9 @@ package cli
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -91,15 +93,23 @@ func TestPRMergeRequiresURLAndReviewedHead(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := setConfigEnv(t)
-			srv, capture := reviewServer(t, http.StatusOK, `{"ok":true,"prNumber":42}`)
+			var mergeRequests atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/prs/42/merge" {
+					mergeRequests.Add(1)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"ok":true,"prNumber":42}`))
+			}))
+			t.Cleanup(srv.Close)
 			writeRunFileFor(t, cfg, srv)
 			args := append([]string{"pr", "merge", "42"}, tc.args...)
 			out, _, err := executeCLI(t, aliveDeps(), args...)
 			if got := ExitCode(err); got != 2 {
 				t.Fatalf("exit code = %d, want 2; err=%v", got, err)
 			}
-			if capture.method != "" || strings.Contains(out, "merged PR") {
-				t.Fatalf("invalid invocation sent a request or reported success: request=%s stdout=%q", capture.method, out)
+			if mergeRequests.Load() != 0 || strings.Contains(out, "merged PR") {
+				t.Fatalf("invalid invocation reached merge or reported success: merge requests=%d stdout=%q", mergeRequests.Load(), out)
 			}
 		})
 	}
@@ -146,7 +156,7 @@ func TestPRMergeSurfacesDaemonError(t *testing.T) {
 					t.Fatalf("err = %q, want %q", err, want)
 				}
 			}
-			if capture.method != http.MethodPost || strings.Contains(out, "merged PR") {
+			if capture.method != http.MethodPost || capture.path != "/api/v1/prs/42/merge" || strings.Contains(out, "merged PR") {
 				t.Fatalf("failed merge request = %s; stdout=%q", capture.method, out)
 			}
 		})
