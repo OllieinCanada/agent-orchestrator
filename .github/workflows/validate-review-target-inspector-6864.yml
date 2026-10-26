@@ -26,3 +26,6 @@ jobs:
       - name: Test review-triggered PR context
         working-directory: frontend
         run: npm test -- src/renderer/components/SessionInspector.test.tsx -t 'review-triggered PR context'
+      - name: Test inspector and review helpers
+        working-directory: frontend
+        run: npm test -- src/renderer/components/SessionInspector.test.tsx src/renderer/components/SessionInspector.remote.test.tsx src/renderer/lib/session-reviews.test.ts src/renderer/lib/pr-display.test.ts
