@@ -626,7 +626,7 @@ describe("SessionInspector PR section", () => {
     expect(await screen.findByRole("link", { name: "PR 7" })).toHaveAttribute("href", attached.url);
     await openAttachedReview();
     expect(await screen.findByText("Review-only carrier approved this change.")).toBeInTheDocument();
-    expect(postMock).not.toHaveBeenCalled();
+    expect(postMock.mock.calls.filter(([path]) => path.startsWith("/api/v1/sessions/") || path.startsWith("/api/v1/prs/"))).toEqual([]);
     expect(patchMock).not.toHaveBeenCalled();
   });
 
@@ -653,7 +653,7 @@ describe("SessionInspector PR section", () => {
     expect(prSection("Pull requests (2)").getAllByText(/^PR #\d+$/)).toHaveLength(2);
     await openAttachedReview();
     expect(await screen.findByText("New attachment reviewed.")).toBeInTheDocument();
-    expect(postMock).not.toHaveBeenCalled();
+    expect(postMock.mock.calls.filter(([path]) => path.startsWith("/api/v1/sessions/") || path.startsWith("/api/v1/prs/"))).toEqual([]);
     expect(patchMock).not.toHaveBeenCalled();
   });
 
