@@ -1,0 +1,33 @@
+name: Windows project script regression validation
+
+on:
+  push:
+    branches: [validation/windows-script-quotes-7211]
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: backend
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l internal/session_manager/workspace_*.go)
+          if [ -n "$unformatted" ]; then
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: Regress quoted setup and cleanup commands
+        run: go test -race -count=1 -v -run '^TestRunPostCreateAndCleanupWindowsQuotedPaths$' ./internal/session_manager
+      - name: Vet session manager
+        run: go vet ./internal/session_manager
