@@ -15,6 +15,9 @@ jobs:
         working-directory: backend
         shell: bash
     steps:
+      - name: Check out LF source files
+        working-directory: .
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
