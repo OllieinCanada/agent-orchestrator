@@ -295,7 +295,8 @@ export const SessionInspector = memo(function SessionInspector({
 	const sessionLoaded = session !== undefined;
 	useEffect(() => {
 		// Until the session loads, its tabs are unknown: keep the requested view.
-		if (view === requestedView || (!sessionLoaded && !onlyBrowser) || (!onlyBrowser && sessionLoaded && !session?.cloud && reviewPRs.isPending)) return;
+		if (view === requestedView || (!sessionLoaded && !onlyBrowser)) return;
+		if (requestedView === "reviews" && !onlyBrowser && !session?.cloud && reviewPRs.isPending) return;
 		setInternalView(view);
 		onViewChange?.(view);
 	}, [onViewChange, onlyBrowser, requestedView, reviewPRs.isPending, session?.cloud, sessionLoaded, view]);

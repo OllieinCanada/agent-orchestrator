@@ -589,7 +589,6 @@ describe("SessionInspector PR section", () => {
         .closest("[data-testid='inspector-section']") as HTMLElement,
     );
 
-
   const openAttachedReview = async () => {
     await userEvent.click(await screen.findByRole("tab", { name: "Reviews" }));
     for (const row of await screen.findAllByTestId("review-pr-row")) {
@@ -629,7 +628,6 @@ describe("SessionInspector PR section", () => {
     expect(postMock.mock.calls.filter(([path]) => path.startsWith("/api/v1/sessions/") || path.startsWith("/api/v1/prs/"))).toEqual([]);
     expect(patchMock).not.toHaveBeenCalled();
   });
-
 
   it("includes a new review-triggered PR context alongside an existing PR", async () => {
     const owned = prSummary(7, "open", { url: "https://github.com/acme/repo/pull/7" });
